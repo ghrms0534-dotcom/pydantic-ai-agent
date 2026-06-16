@@ -35,7 +35,7 @@ async def check_ollama_connection() -> None:
 
 
 async def run_worker() -> None:
-    print("pydantic-ai-agent worker started.", flush=True)
+    print("maos worker started.", flush=True)
     while True:
         try:
             await check_ollama_connection()
@@ -49,7 +49,7 @@ def main() -> None:
     try:
         asyncio.run(run_worker())
     except KeyboardInterrupt:
-        print("pydantic-ai-agent worker stopped.", flush=True)
+        print("maos worker stopped.", flush=True)
 
 
 if __name__ == "__main__":

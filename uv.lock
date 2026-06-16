@@ -447,7 +447,7 @@ wheels = [
 ]
 
 [[package]]
-name = "pydantic-ai-agent"
+name = "maos"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

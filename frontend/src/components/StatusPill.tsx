@@ -12,8 +12,8 @@ type StatusPillProps = {
 
 export function StatusPill({ status, settings, toolsLoaded }: StatusPillProps) {
   const [open, setOpen] = useState(false);
-  const label = status === 'checking' ? 'API 확인 중' : status === 'online' ? 'API 상태: 정상' : 'API 상태: 오프라인';
-  const backend = status === 'checking' ? '확인 중' : status === 'online' ? '정상' : '오프라인';
+  const label = status === 'checking' ? 'AI 연결 확인 중' : status === 'online' ? 'AI 연결 정상' : 'AI 연결 오프라인';
+  const server = status === 'checking' ? '확인 중' : status === 'online' ? '정상' : '오프라인';
   const className =
     status === 'online'
       ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300'
@@ -32,12 +32,11 @@ export function StatusPill({ status, settings, toolsLoaded }: StatusPillProps) {
       </button>
       {open && (
         <div className="card absolute right-0 top-11 z-20 w-72 p-4">
-          <div className="mb-3 text-sm font-semibold">API 상태 상세</div>
-          <StatusRow label="백엔드" value={backend} />
-          <StatusRow label="API 기본 URL" value={settings.apiBaseUrl} />
-          <StatusRow label="에이전트" value={settings.agentName} />
+          <div className="mb-3 text-sm font-semibold">시스템 상태</div>
+          <StatusRow label="서버" value={server} />
+          <StatusRow label="실행 모드" value={settings.agentName} />
           <StatusRow label="AI 모델" value={settings.modelName} />
-          <StatusRow label="로드된 도구" value={`${toolsLoaded}`} />
+          <StatusRow label="사용 가능 도구" value={`${toolsLoaded}`} />
         </div>
       )}
     </div>

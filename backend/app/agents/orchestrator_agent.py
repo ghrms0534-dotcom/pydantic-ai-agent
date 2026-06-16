@@ -11,10 +11,10 @@ from backend.app.config import get_settings
 from backend.app.tools.registry import explicitly_requests_multiple_agents, has_api_intent, has_devops_intent
 
 
-def build_orchestrator_agent() -> Agent[None, str]:
+def build_orchestrator_agent(model_name: str | None = None) -> Agent[None, str]:
     settings = get_settings()
     model = OpenAIModel(
-        settings.ollama_model,
+        model_name or settings.ollama_model,
         provider=OpenAIProvider(
             base_url=settings.ollama_openai_base_url,
             api_key="ollama",
@@ -32,11 +32,11 @@ def build_orchestrator_agent() -> Agent[None, str]:
     )
 
 
-async def run_orchestrator_agent(prompt: str) -> str:
+async def run_orchestrator_agent(prompt: str, model_name: str | None = None) -> str:
     if explicitly_requests_multiple_agents(prompt):
         devops_result, api_result = await asyncio.gather(
-            run_devops_agent(prompt),
-            run_api_agent(prompt),
+            _run_devops(prompt, model_name),
+            _run_api(prompt, model_name),
         )
         return (
             "DevOps Agent 결과:\n"
@@ -46,11 +46,23 @@ async def run_orchestrator_agent(prompt: str) -> str:
         )
 
     if has_devops_intent(prompt):
-        return await run_devops_agent(prompt)
+        return await _run_devops(prompt, model_name)
 
     if has_api_intent(prompt):
-        return await run_api_agent(prompt)
+        return await _run_api(prompt, model_name)
 
-    agent = build_orchestrator_agent()
+    agent = build_orchestrator_agent(model_name) if model_name is not None else build_orchestrator_agent()
     result = await agent.run(prompt)
     return result.output
+
+
+async def _run_devops(prompt: str, model_name: str | None = None) -> str:
+    if model_name is None:
+        return await run_devops_agent(prompt)
+    return await run_devops_agent(prompt, model_name)
+
+
+async def _run_api(prompt: str, model_name: str | None = None) -> str:
+    if model_name is None:
+        return await run_api_agent(prompt)
+    return await run_api_agent(prompt, model_name)

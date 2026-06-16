@@ -7,10 +7,10 @@ from backend.app.config import get_settings
 from backend.app.tools.registry import register_api_tools, route_api_tool_call
 
 
-def build_api_agent() -> Agent[None, str]:
+def build_api_agent(model_name: str | None = None) -> Agent[None, str]:
     settings = get_settings()
     model = OpenAIModel(
-        settings.ollama_model,
+        model_name or settings.ollama_model,
         provider=OpenAIProvider(
             base_url=settings.ollama_openai_base_url,
             api_key="ollama",
@@ -29,11 +29,11 @@ def build_api_agent() -> Agent[None, str]:
     return agent
 
 
-async def run_api_agent(prompt: str) -> str:
+async def run_api_agent(prompt: str, model_name: str | None = None) -> str:
     routed_result = route_api_tool_call(prompt)
     if routed_result is not None:
         return routed_result
 
-    agent = build_api_agent()
+    agent = build_api_agent(model_name)
     result = await agent.run(prompt)
     return result.output

@@ -15,6 +15,9 @@ class Settings(BaseSettings):
 
     ollama_base_url: str = Field(default="http://localhost:11434")
     ollama_model: str = Field(default="qwen2.5:3b")
+    fast_model: str | None = Field(default=None)
+    korean_model: str | None = Field(default=None)
+    reasoning_model: str | None = Field(default=None)
 
     @property
     def ollama_openai_base_url(self) -> str:

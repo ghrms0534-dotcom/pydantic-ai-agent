@@ -46,11 +46,11 @@ def test_route_devops_tool_call_uses_namespace(monkeypatch) -> None:
 
     def fake_get_k8s_pods(namespace: str | None = None) -> str:
         calls.append(namespace)
-        return f"pods for {namespace}"
+        return "NAMESPACE NAME READY STATUS RESTARTS AGE\nkube-system coredns 1/1 Running 0 1m"
 
     monkeypatch.setattr(registry, "get_k8s_pods", fake_get_k8s_pods)
 
-    assert registry.route_devops_tool_call("kube-system namespace pod 보여줘") == "pods for kube-system"
+    assert "coredns" in registry.route_devops_tool_call("kube-system namespace pod 보여줘")
     assert calls == ["kube-system"]
 
 

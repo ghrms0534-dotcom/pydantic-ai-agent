@@ -64,6 +64,7 @@ function App() {
     [currentSessionId, sessions],
   );
   const messages = currentSession?.messages ?? starterMessages;
+  const recentAgent = getRecentAgent(activity);
 
   useEffect(() => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -186,11 +187,36 @@ function App() {
     setError(null);
   }
 
+  function handleDeleteSession(sessionId: string) {
+    setSessions((current) => {
+      const remaining = current.filter((session) => session.id !== sessionId);
+      if (sessionId !== currentSessionId) {
+        return remaining;
+      }
+
+      const nextSession = remaining[0] ?? createSession();
+      setCurrentSessionId(nextSession.id);
+      setInput('');
+      setError(null);
+      setActivity([]);
+      return remaining.length > 0 ? remaining : [nextSession];
+    });
+  }
+
+  function handleClearSessions() {
+    const session = createSession();
+    setSessions([session]);
+    setCurrentSessionId(session.id);
+    setInput('');
+    setError(null);
+    setActivity([]);
+  }
+
   return (
     <div className="app-bg flex h-screen overflow-hidden">
       <div className="flex min-h-0 w-full flex-col">
         <Header apiStatus={apiStatus} settings={settings} toolsLoaded={tools.length} />
-        <div className="grid min-h-0 flex-1 grid-cols-[240px_minmax(0,1fr)_320px]">
+        <div className="grid min-h-0 flex-1 grid-cols-[240px_minmax(0,1fr)_280px]">
           <Sidebar
             activeView={activeView}
             sessions={sessions}
@@ -202,6 +228,8 @@ function App() {
             onViewChange={setActiveView}
             onNewChat={handleNewChat}
             onRestoreSession={handleRestoreSession}
+            onDeleteSession={handleDeleteSession}
+            onClearSessions={handleClearSessions}
             onSettingsChange={setSettings}
           />
           <ChatConsole
@@ -213,7 +241,7 @@ function App() {
             onInputChange={setInput}
             onSend={() => void handleSend()}
           />
-          <RightPanel settings={settings} tools={tools} />
+          <RightPanel settings={settings} tools={tools} recentAgent={recentAgent} />
         </div>
       </div>
     </div>
@@ -221,3 +249,20 @@ function App() {
 }
 
 export default App;
+
+function getRecentAgent(activity: AgentActivityStep[]): string {
+  const selected = [...activity].reverse().find((step) => step.step === 'tool_selection');
+  if (!selected) {
+    return 'Chat Agent';
+  }
+  if (selected.tool === 'get_git_status') {
+    return 'Git Agent';
+  }
+  if (selected.tool?.includes('k8s')) {
+    return 'Kubernetes Agent';
+  }
+  if (selected.tool === 'get_github_repo_info') {
+    return 'GitHub Agent';
+  }
+  return selected.agent === 'DevOps Agent' ? 'Kubernetes Agent' : selected.agent ?? 'Chat Agent';
+}

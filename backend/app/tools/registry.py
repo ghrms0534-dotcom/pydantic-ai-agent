@@ -14,6 +14,7 @@ from backend.app.tools.devops.k8s_tools import (
     get_k8s_services,
     summarize_k8s_pods,
 )
+from backend.app.tools.validation import run_with_validation_retry
 
 
 class Intent(str, Enum):
@@ -184,17 +185,23 @@ def route_devops_tool_call(prompt: str) -> str | None:
     prefix = _k8s_explanation_prefix(prompt)
 
     if intent == Intent.SUMMARY:
-        return prefix + summarize_k8s_pods()
+        result, _validation = run_with_validation_retry("summarize_k8s_pods", summarize_k8s_pods)
+        return prefix + result
     if intent == Intent.POD:
-        return prefix + get_k8s_pods(namespace=namespace)
+        result, _validation = run_with_validation_retry("get_k8s_pods", lambda: get_k8s_pods(namespace=namespace))
+        return prefix + result
     if intent == Intent.DEPLOYMENT:
-        return prefix + get_k8s_deployments()
+        result, _validation = run_with_validation_retry("get_k8s_deployments", get_k8s_deployments)
+        return prefix + result
     if intent == Intent.SERVICE:
-        return prefix + get_k8s_services()
+        result, _validation = run_with_validation_retry("get_k8s_services", get_k8s_services)
+        return prefix + result
     if intent == Intent.NAMESPACE:
-        return prefix + get_k8s_namespaces()
+        result, _validation = run_with_validation_retry("get_k8s_namespaces", get_k8s_namespaces)
+        return prefix + result
     if intent == Intent.NODE:
-        return prefix + get_k8s_nodes()
+        result, _validation = run_with_validation_retry("get_k8s_nodes", get_k8s_nodes)
+        return prefix + result
 
     return None
 

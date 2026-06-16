@@ -1,5 +1,5 @@
 import type { AgentActivityStep, ToolInfo } from '../types/chat';
-import { addToolDisplay } from '../utils/toolDisplay';
+import { addToolDisplay, isToolVisibleInUi } from '../utils/toolDisplay';
 
 export type ChatRequest = {
   message: string;
@@ -13,7 +13,7 @@ export type ChatResponse = {
 export type ApiStatus = 'checking' | 'online' | 'offline';
 
 type StreamEvent =
-  | ({ type: 'trace' } & Required<AgentActivityStep>)
+  | ({ type: 'trace' } & AgentActivityStep)
   | { type: 'answer'; answer: string }
   | { type: 'error'; message: string };
 
@@ -38,7 +38,7 @@ export async function fetchTools(apiBaseUrl: string): Promise<ToolInfo[]> {
   }
 
   const data = (await response.json()) as { tools?: ToolInfo[] };
-  return (data.tools ?? []).map(addToolDisplay);
+  return (data.tools ?? []).filter(isToolVisibleInUi).map(addToolDisplay);
 }
 
 export async function sendChat(message: string, apiBaseUrl: string, modelName?: string): Promise<ChatResponse> {
@@ -95,9 +95,13 @@ export async function streamChat(
       const event = JSON.parse(line) as StreamEvent;
       if (event.type === 'trace') {
         onActivity({
+          step: event.step,
           label: event.label,
           description: event.description,
           status: event.status,
+          agent: event.agent,
+          tool: event.tool,
+          metadata: event.metadata,
         });
       } else if (event.type === 'answer') {
         return { answer: event.answer };

@@ -1,260 +1,243 @@
-﻿# pydantic-ai-agent
+# MAOS
 
-PydanticAI와 Ollama 기반 로컬 AI Agent Platform 프로젝트입니다. 현재 구조는 React 대시보드, FastAPI 백엔드, Agent runner, Multi MCP Orchestrator, Hybrid Tool Router, Docker/Kubernetes 배포 구성을 포함합니다.
+MAOS는 **Multi-Agent Orchestration System**의 약자이다.
 
-## 구조
+이 프로젝트는 로컬 환경에서 실행 가능한 AI Agent Runtime System을 직접 설계하고 구축하는 것을 목표로 한다.
 
-```text
-pydantic-ai-agent/
-├── backend/
-│   ├── app/
-│   │   ├── agent/
-│   │   ├── agents/
-│   │   ├── api/
-│   │   ├── models/
-│   │   ├── services/
-│   │   ├── tools/
-│   │   ├── config.py
-│   │   └── main.py
-│   ├── scripts/
-│   └── tests/
-├── frontend/
-│   ├── src/
-│   │   ├── api/
-│   │   ├── components/
-│   │   ├── data/
-│   │   ├── types/
-│   │   ├── App.tsx
-│   │   ├── main.tsx
-│   │   └── styles.css
-│   ├── package.json
-│   └── vite.config.ts
-├── k8s/
-├── Dockerfile
-├── pyproject.toml
-├── uv.lock
-├── README.md
-├── .env.example
-├── .gitignore
-└── .dockerignore
-```
+기존 단일 LLM 기반 Chatbot 구조가 아니라, 사용자의 요청을 분석하고 역할별 Agent가 작업을 수행하며 Tool 실행 결과를 검증하는 **Multi-Agent Architecture (MAS)** 구조를 기반으로 설계하였다.
 
-## 요구사항
+최종 목표는 단순 질의응답 시스템이 아닌 **Production 수준의 AI Agent Platform 구축**이다.
 
-- Python 3.11 이상
-- uv
-- Node.js 20 이상
-- Ollama
-- Ollama model: `qwen2.5:3b`
-- Docker, kind, kubectl
+---
 
-## 백엔드 실행
+## 시스템 개요
 
-Windows PowerShell 기준입니다.
+사용자가 자연어로 질문을 입력하면 시스템은 질문을 분석하여 어떤 작업인지 먼저 판단한다.
 
-```powershell
-uv venv
-.\.venv\Scripts\Activate.ps1
-uv sync
-Copy-Item .env.example .env
-ollama pull qwen2.5:3b
-```
+일반적인 Chat 요청인지, Kubernetes 상태 조회인지, Git 상태 확인인지, API 호출이 필요한 작업인지 먼저 분류한 뒤 적절한 Agent를 선택한다.
 
-로컬 실행은 `.env`의 값을 사용합니다.
+선택된 Agent는 필요한 Tool을 실행하고 결과를 검증한 후 최종 응답을 생성한다.
 
-```env
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5:3b
-```
-
-Ollama 연결 확인:
-
-```powershell
-uv run python backend/scripts/health_check.py
-```
-
-CLI 실행:
-
-```powershell
-uv run python -m backend.app.main
-```
-
-FastAPI 실행:
-
-```powershell
-uvicorn backend.app.api.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-Swagger:
+전체 시스템은 다음과 같은 구조로 동작한다.
 
 ```text
-http://localhost:8000/docs
+사용자 요청
+   │
+   ▼
+Frontend Dashboard (React)
+   │
+   ▼
+FastAPI Backend
+   │
+   ▼
+Planner Agent
+   │
+   ▼
+Role Agent Selection
+(Chat / DevOps / API / Local)
+   │
+   ▼
+Tool Selection
+   │
+   ▼
+Tool Execution
+   │
+   ▼
+Validation Layer
+   │
+   ▼
+Final Response
 ```
 
-Health check:
+---
 
-```powershell
-curl http://localhost:8000/health
-```
+## 시스템 구성 요소
 
-기존 chat endpoint:
+이 프로젝트를 구성하는 모든 요소는 로컬 환경에서 직접 실행 가능하도록 설계하였다.
 
-```powershell
-curl -X POST http://localhost:8000/chat `
-  -H "Content-Type: application/json" `
-  -d "{\"message\":\"hello\"}"
-```
+| 구성 요소          | 기술                | 역할                                |
+| ------------------ | ------------------- | ----------------------------------- |
+| Frontend Dashboard | React + TypeScript  | 사용자 채팅 UI 및 Agent 상태 시각화 |
+| Backend API        | FastAPI             | API 서버 및 Agent Runtime 관리      |
+| Agent Framework    | PydanticAI          | Agent 실행 구조 관리                |
+| Model Runtime      | Ollama              | 로컬 LLM 실행                       |
+| Planner            | Python              | 사용자 요청 분석 및 작업 분류       |
+| Role Agents        | Python              | 역할별 Agent 실행                   |
+| Tool Registry      | Python              | 사용 가능한 Tool 중앙 관리          |
+| Validation Layer   | Python              | Tool 실행 결과 검증                 |
+| Infrastructure     | Docker + Kubernetes | 컨테이너 실행 및 배포 환경          |
 
-Dashboard chat endpoint:
+---
 
-```powershell
-curl -X POST http://localhost:8000/api/chat `
-  -H "Content-Type: application/json" `
-  -d "{\"message\":\"현재 Kubernetes pod 상태 알려줘\"}"
-```
+## Agent Architecture
 
-## 프론트엔드 실행
+시스템은 역할별 Agent 구조를 기반으로 동작한다.
 
-```powershell
-cd frontend
-npm install
-npm run dev
-```
+각 Agent는 독립적인 역할을 수행하도록 분리하였다.
 
-브라우저 접속:
+현재 Agent 구조는 다음과 같다.
+
+### Planner Agent
+
+사용자의 요청을 분석하여 어떤 유형의 작업인지 먼저 판단한다.
+
+예시
+
+- 일반 대화
+- Kubernetes 관련 요청
+- Git 관련 요청
+- GitHub API 요청
+- 시스템 로컬 작업 요청
+
+---
+
+### DevOps Agent
+
+인프라 관련 작업을 담당한다.
+
+지원 작업
+
+- Kubernetes Pod 상태 조회
+- Deployment 상태 확인
+- Docker Container 조회
+- Infrastructure 상태 확인
+
+---
+
+### Git Agent
+
+Git 관련 작업을 담당한다.
+
+지원 작업
+
+- Git Status 확인
+- Branch 조회
+- Commit 상태 확인
+- Remote Repository 확인
+
+---
+
+### API Agent
+
+외부 API 호출이 필요한 작업을 담당한다.
+
+지원 작업
+
+- GitHub Repository API
+- Network API
+- 외부 서비스 상태 확인
+
+---
+
+## Tool Execution System
+
+Agent는 직접 작업하지 않는다.
+
+각 Agent는 Tool Registry에 등록된 Tool을 선택하여 작업을 수행한다.
+
+현재 Tool 구조는 다음과 같다.
+
+Infrastructure Tools
+
+- Kubernetes Tool
+- Docker Tool
+
+Development Tools
+
+- Git Tool
+- GitHub Tool
+
+System Tools
+
+- Network Tool
+- Local System Tool
+
+모든 Tool 실행 이후 Validation Layer가 결과를 검증한다.
+
+검증 항목
+
+- 응답 데이터 존재 여부
+- Error 문자열 확인
+- 비정상 출력 감지
+- 사용자 응답 가능 여부 판단
+
+---
+
+## Frontend Dashboard
+
+Frontend는 단순 Chat UI가 아니다.
+
+Agent Runtime 상태를 실시간으로 시각화하도록 설계하였다.
+
+현재 Dashboard 기능
+
+- 실시간 Chat
+- Agent Activity 확인
+- Tool 상태 확인
+- Execution Trace
+- Session History
+- Settings 관리
+
+---
+
+## 프로젝트 구조
 
 ```text
-http://localhost:5173
+backend/
+
+app/agent/
+ ├── planner.py
+ ├── model_router.py
+ ├── role_agents.py
+ ├── runner.py
+
+app/agents/
+ ├── devops_agent.py
+ ├── api_agent.py
+ ├── orchestrator_agent.py
+
+app/tools/
+ ├── registry.py
+ ├── validation.py
+
+frontend/
+
+k8s/
 ```
 
-Frontend API client의 기본 백엔드 주소는 아래와 같습니다.
+---
 
-```text
-http://localhost:8000
-```
+## 핵심 목표
 
-다른 백엔드 주소를 사용하려면 `frontend/.env`에 설정합니다.
+이 프로젝트의 목적은 단순히 AI Chatbot을 만드는 것이 아니다.
 
-```env
-VITE_API_BASE_URL=http://localhost:8000
-```
+직접 Multi-Agent System Architecture를 설계하고 실제 동작 가능한 Runtime Platform 형태로 구현하는 것이다.
 
-Production build:
+현재 AI 시스템은 단순 LLM 호출에서 벗어나 여러 Agent가 역할을 분리하고 Tool을 활용하는 방향으로 발전하고 있다.
 
-```powershell
-cd frontend
-npm run build
-```
+이 프로젝트는 그러한 구조를 로컬 환경에서 직접 구현하는 것을 목표로 한다.
 
-## API
+---
 
-- `GET /health`: 서버 상태 확인
-- `GET /tools`: 현재 Agent 도구 목록 조회
-- `POST /chat`: 기존 chat endpoint
-- `POST /api/chat`: Dashboard용 chat endpoint
+## 현재 구현 상태
 
-`POST /api/chat` 요청:
+현재 구현 완료 항목
 
-```json
-{
-  "message": "현재 Kubernetes pod 상태 알려줘"
-}
-```
+- Multi-Agent Architecture
+- Planner Agent
+- Role-based Agent Structure
+- Tool Registry
+- Tool Validation System
+- FastAPI API Server
+- React Dashboard
+- Ollama Local Model Integration
+- Docker Container Runtime
+- Kubernetes Deployment
 
-응답:
+---
 
-```json
-{
-  "answer": "..."
-}
-```
+## 개발 목적
 
-## Dashboard
+AI Engineering 분야에서는 단순 LLM 호출보다 실제 Agent Runtime 구조 설계가 중요해지고 있다.
 
-React + TypeScript + Vite + TailwindCSS 기반 대시보드입니다.
-
-- Top Header: API Status
-- Left Sidebar: Chat, History, Tools, Settings
-- Center: Chat UI, input box, Send button, Loading spinner, New Chat
-- Right Sidebar: Agent Info, Available Tools, Reasoning Process
-
-Reasoning Process UI는 실제 chain-of-thought가 아니라 진행 단계 표시용입니다.
-
-```text
-1. Detect intent
-2. Select tool
-3. Execute tool
-4. Process result
-5. Return answer
-```
-
-## Response Guards
-
-최종 응답은 자연스러운 한국어를 우선합니다. 중국어/일본어 문자가 섞이면 language guard가 1회 재시도하고, 실패하면 안전 문구를 반환합니다.
-
-Tool 결과는 가능한 raw output 그대로가 아니라 한국어 요약 또는 보기 좋은 상태 표로 반환합니다. `kubectl`, shell, JSON, YAML, table 출력은 output guard가 감지합니다.
-
-Kubernetes 원본 상태값은 그대로 유지합니다.
-
-```text
-Running
-Pending
-CrashLoopBackOff
-ImagePullBackOff
-```
-
-## Kubernetes Deploy
-
-Kubernetes Pod 안에서 `localhost`는 로컬 PC가 아니라 Pod 자기 자신입니다. Deployment에서는 Ollama 주소를 `http://host.docker.internal:11434`로 주입합니다. 로컬 `.env`의 `localhost` 값은 변경하지 않습니다.
-
-```powershell
-docker build -t pydantic-ai-agent:local .
-kind load docker-image pydantic-ai-agent:local
-kubectl apply -f k8s/agent-deployment.yaml
-kubectl get pods
-kubectl logs deployment/pydantic-ai-agent
-kubectl delete -f k8s/agent-deployment.yaml
-```
-
-`kind load docker-image`는 kind 노드가 로컬 Docker 이미지를 사용할 수 있게 합니다. `imagePullPolicy: Never`는 외부 registry pull 대신 kind 노드에 로드된 이미지를 사용하게 합니다.
-
-## Tools
-
-- `get_git_status`: `git status --short`
-- `get_k8s_pods`: Kubernetes Pod 조회
-- `get_k8s_deployments`: Kubernetes Deployment 조회
-- `get_k8s_services`: Kubernetes Service 조회
-- `get_k8s_namespaces`: Kubernetes Namespace 조회
-- `get_k8s_nodes`: Kubernetes Node 조회
-- `get_github_repo_info`: GitHub public repository 정보 조회
-- `get_public_ip`: public IP 조회
-
-## 예시 질문
-
-```text
-안녕
-쿠버네티스가 무엇인가
-현재 pods 상태 알려줘
-default namespace pod 보여줘
-현재 deployment 상태 알려줘
-현재 service 목록 알려줘
-현재 namespace 목록 알려줘
-현재 node 상태 알려줘
-pod 상태 보기 좋게 요약해줘
-FastAPI endpoint 하나 만들어줘
-```
-
-## 검증
-
-Backend tests:
-
-```powershell
-pytest
-```
-
-Frontend build:
-
-```powershell
-cd frontend
-npm run build
-```
+이 프로젝트는 그러한 구조를 이해하고 직접 구현하기 위한 개인 AI Engineering Project이다.

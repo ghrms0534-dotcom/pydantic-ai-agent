@@ -14,9 +14,13 @@ export type ChatSession = {
 };
 
 export type AgentActivityStep = {
+  step?: 'planning' | 'tool_selection' | 'tool_execution' | 'validation' | 'final_answer';
   label: string;
   description: string;
   status?: 'pending' | 'active' | 'complete' | 'error';
+  agent?: string;
+  tool?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type ToolInfo = {

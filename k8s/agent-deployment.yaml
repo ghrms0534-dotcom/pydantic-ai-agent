@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: pydantic-ai-agent
+  name: maos
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: pydantic-ai-agent
+      app: maos
   template:
     metadata:
       labels:
-        app: pydantic-ai-agent
+        app: maos
     spec:
       containers:
-        - name: pydantic-ai-agent
-          image: pydantic-ai-agent:local
+        - name: maos
+          image: maos:local
           imagePullPolicy: Never
           env:
             - name: OLLAMA_BASE_URL

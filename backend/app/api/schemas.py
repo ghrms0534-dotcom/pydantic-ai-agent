@@ -1,4 +1,9 @@
-﻿from pydantic import BaseModel
+from typing import Any, Literal
+
+from pydantic import BaseModel
+
+
+AgentStepName = Literal["planning", "tool_selection", "tool_execution", "validation", "final_answer"]
 
 
 class ChatRequest(BaseModel):
@@ -8,6 +13,24 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
+
+
+class AgentStep(BaseModel):
+    step: AgentStepName
+    label: str
+    description: str
+    status: str
+    agent: str | None = None
+    tool: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class PlannerResult(BaseModel):
+    intent: Literal["chat", "k8s", "file", "code", "tool", "unknown"]
+    confidence: float
+    reason: str
+    suggested_tool: str | None = None
+    needs_tool: bool
 
 
 class ToolInfo(BaseModel):

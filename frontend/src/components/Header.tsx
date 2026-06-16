@@ -1,8 +1,8 @@
-import { Bot } from 'lucide-react';
+import { Bot } from "lucide-react";
 
-import type { ApiStatus } from '../api/client';
-import type { DashboardSettings } from '../types/chat';
-import { StatusPill } from './StatusPill';
+import type { ApiStatus } from "../api/client";
+import type { DashboardSettings } from "../types/chat";
+import { StatusPill } from "./StatusPill";
 
 type HeaderProps = {
   apiStatus: ApiStatus;
@@ -18,11 +18,15 @@ export function Header({ apiStatus, settings, toolsLoaded }: HeaderProps) {
           <Bot size={22} aria-hidden="true" />
         </div>
         <div>
-          <h1 className="text-lg font-semibold">Pydantic AI Agent 대시보드</h1>
-          <p className="text-muted text-sm">로컬 LLM, MCP Router, FastAPI 오케스트레이션</p>
+          <h1 className="text-lg font-semibold">MAOS Dashboard</h1>
+          <p className="text-muted text-sm">AI Runtime Architecture</p>
         </div>
       </div>
-      <StatusPill status={apiStatus} settings={settings} toolsLoaded={toolsLoaded} />
+      <StatusPill
+        status={apiStatus}
+        settings={settings}
+        toolsLoaded={toolsLoaded}
+      />
     </header>
   );
 }

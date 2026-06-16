@@ -24,21 +24,27 @@ RETRY_NATURAL_KOREAN_INSTRUCTION = (
 )
 
 
-async def _call_agent_once(message: str) -> Any:
-    return await run_local_agent(message)
+async def _call_agent_once(message: str, model_name: str | None = None) -> Any:
+    return await run_local_agent(message, model_name)
 
 
-async def _summarize_raw_output_once(message: str, raw_output: str) -> str:
+async def _call_agent(message: str, model_name: str | None = None) -> Any:
+    if model_name is None:
+        return await _call_agent_once(message)
+    return await _call_agent_once(message, model_name)
+
+
+async def _summarize_raw_output_once(message: str, raw_output: str, model_name: str | None = None) -> str:
     summarize_prompt = build_summarize_prompt(original_message=message, raw_output=raw_output)
-    return stringify_tool_result(await _call_agent_once(summarize_prompt))
+    return stringify_tool_result(await _call_agent(summarize_prompt, model_name))
 
 
-async def _ensure_not_raw_output(message: str, answer: str) -> str:
+async def _ensure_not_raw_output(message: str, answer: str, model_name: str | None = None) -> str:
     if not looks_like_raw_tool_output(answer):
         return answer
 
     try:
-        summarized_answer = _clean_answer(await _summarize_raw_output_once(message, answer))
+        summarized_answer = _clean_answer(await _summarize_raw_output_once(message, answer, model_name))
     except Exception:
         return build_raw_output_fallback(answer)
 
@@ -48,7 +54,7 @@ async def _ensure_not_raw_output(message: str, answer: str) -> str:
     return summarized_answer
 
 
-async def _ensure_korean_only(message: str, answer: str) -> str:
+async def _ensure_korean_only(message: str, answer: str, model_name: str | None = None) -> str:
     if not contains_blocked_cjk(answer) and not contains_awkward_mixed_language(answer):
         return answer
 
@@ -58,7 +64,7 @@ async def _ensure_korean_only(message: str, answer: str) -> str:
         else RETRY_NATURAL_KOREAN_INSTRUCTION
     )
     retry_message = f"{message}\n\n{instruction}"
-    retry_answer = _clean_answer(await _call_agent_once(retry_message))
+    retry_answer = _clean_answer(await _call_agent(retry_message, model_name))
     return ensure_natural_korean_answer(retry_answer)
 
 
@@ -66,7 +72,7 @@ def _clean_answer(answer: Any) -> str:
     return stringify_tool_result(answer).strip()
 
 
-async def run_agent(message: str) -> str:
-    answer = _clean_answer(await _call_agent_once(message))
-    answer = await _ensure_not_raw_output(message, answer)
-    return await _ensure_korean_only(message, answer)
+async def run_agent(message: str, model_name: str | None = None) -> str:
+    answer = _clean_answer(await _call_agent(message, model_name))
+    answer = await _ensure_not_raw_output(message, answer, model_name)
+    return await _ensure_korean_only(message, answer, model_name)

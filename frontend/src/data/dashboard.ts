@@ -6,7 +6,7 @@ export const starterMessages: ChatMessage[] = [
   {
     id: 'welcome',
     role: 'agent',
-    content: '대시보드 준비 완료. 쿠버네티스, GitHub, 네트워크 상태 등을 물어보세요.',
+    content: '대시보드 준비 완료. 쿠버네티스, GitHub, 코드 작업 등을 물어보세요.',
   },
 ];
 
