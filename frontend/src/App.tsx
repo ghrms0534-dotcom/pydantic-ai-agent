@@ -1,16 +1,33 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { ApiStatus, checkHealth, fetchTools, streamChat } from './api/client';
+import {
+  ApiStatus,
+  type ObservabilityMetrics,
+  checkHealth,
+  clearMemory,
+  fetchObservabilityMetrics,
+  fetchTools,
+  streamChat,
+} from './api/client';
 import { ChatConsole } from './components/ChatConsole';
 import { Header } from './components/Header';
 import { RightPanel } from './components/RightPanel';
 import { Sidebar, type SidebarView } from './components/Sidebar';
 import { defaultSettings, starterMessages } from './data/dashboard';
-import type { AgentActivityStep, ChatMessage, ChatSession, DashboardSettings, ToolInfo } from './types/chat';
+import type { AgentActivityStep, AgentInfo, ChatMessage, ChatSession, DashboardSettings, ToolInfo } from './types/chat';
+import { fallbackAgents, getAgentDisplayName } from './utils/toolDisplay';
 
 const SETTINGS_KEY = 'pydantic-ai-dashboard:settings';
 const SESSIONS_KEY = 'pydantic-ai-dashboard:sessions';
 const CURRENT_SESSION_KEY = 'pydantic-ai-dashboard:current-session';
+const emptyMetrics: ObservabilityMetrics = {
+  total_requests: 0,
+  total_tool_calls: 0,
+  failed_tool_calls: 0,
+  average_latency_ms: 0,
+  last_request_at: null,
+  last_tool_name: null,
+};
 
 function createSession(): ChatSession {
   return {
@@ -53,6 +70,8 @@ function App() {
   });
   const [activeView, setActiveView] = useState<SidebarView>('trace');
   const [tools, setTools] = useState<ToolInfo[]>([]);
+  const [agents, setAgents] = useState<AgentInfo[]>(fallbackAgents);
+  const [metrics, setMetrics] = useState<ObservabilityMetrics>(emptyMetrics);
   const [toolsError, setToolsError] = useState<string | null>(null);
   const [activity, setActivity] = useState<AgentActivityStep[]>([]);
   const [input, setInput] = useState('');
@@ -93,15 +112,29 @@ function App() {
     });
 
     fetchTools(settings.apiBaseUrl)
-      .then((nextTools) => {
+      .then((discovery) => {
         if (mounted) {
-          setTools(nextTools);
+          setTools(discovery.tools);
+          setAgents(discovery.agents.length > 0 ? discovery.agents : fallbackAgents);
         }
       })
       .catch((requestError) => {
         if (mounted) {
           setTools([]);
+          setAgents(fallbackAgents);
           setToolsError(requestError instanceof Error ? requestError.message : '도구 목록을 불러오지 못했습니다.');
+        }
+      });
+
+    fetchObservabilityMetrics(settings.apiBaseUrl)
+      .then((nextMetrics) => {
+        if (mounted) {
+          setMetrics(nextMetrics);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setMetrics(emptyMetrics);
         }
       });
 
@@ -149,7 +182,7 @@ function App() {
     updateCurrentSession(nextMessages);
 
     try {
-      const response = await streamChat(message, settings.apiBaseUrl, settings.modelName, (step) => {
+      const response = await streamChat(message, settings.apiBaseUrl, settings.modelName, currentSessionId, (step) => {
         setActivity((current) => [...current, step]);
       });
       const agentMessage: ChatMessage = {
@@ -158,6 +191,9 @@ function App() {
         content: response.answer,
       };
       updateCurrentSession([...nextMessages, agentMessage]);
+      fetchObservabilityMetrics(settings.apiBaseUrl)
+        .then(setMetrics)
+        .catch(() => undefined);
       setActivity((current) => [
         ...current,
         { label: '응답 수신', description: '백엔드가 에이전트 응답을 반환했습니다.', status: 'complete' },
@@ -212,6 +248,22 @@ function App() {
     setActivity([]);
   }
 
+  async function handleClearMemory() {
+    if (!currentSessionId) {
+      return;
+    }
+    try {
+      await clearMemory(settings.apiBaseUrl, currentSessionId);
+      setActivity((current) => [
+        ...current,
+        { label: 'Memory 초기화', description: '현재 대화의 backend memory를 초기화했습니다.', status: 'complete' },
+      ]);
+    } catch (requestError) {
+      const text = requestError instanceof Error ? requestError.message : 'Memory 초기화에 실패했습니다.';
+      setActivity((current) => [...current, { label: 'Memory 초기화 실패', description: text, status: 'error' }]);
+    }
+  }
+
   return (
     <div className="app-bg flex h-screen overflow-hidden">
       <div className="flex min-h-0 w-full flex-col">
@@ -230,6 +282,7 @@ function App() {
             onRestoreSession={handleRestoreSession}
             onDeleteSession={handleDeleteSession}
             onClearSessions={handleClearSessions}
+            onClearMemory={() => void handleClearMemory()}
             onSettingsChange={setSettings}
           />
           <ChatConsole
@@ -237,11 +290,11 @@ function App() {
             input={input}
             loading={loading}
             error={error}
-            tools={tools}
+            agents={agents}
             onInputChange={setInput}
             onSend={() => void handleSend()}
           />
-          <RightPanel settings={settings} tools={tools} recentAgent={recentAgent} />
+          <RightPanel settings={settings} agents={agents} metrics={metrics} recentAgent={recentAgent} />
         </div>
       </div>
     </div>
@@ -258,11 +311,13 @@ function getRecentAgent(activity: AgentActivityStep[]): string {
   if (selected.tool === 'get_git_status') {
     return 'Git Agent';
   }
-  if (selected.tool?.includes('k8s')) {
-    return 'Kubernetes Agent';
-  }
   if (selected.tool === 'get_github_repo_info') {
     return 'GitHub Agent';
   }
-  return selected.agent === 'DevOps Agent' ? 'Kubernetes Agent' : selected.agent ?? 'Chat Agent';
+  if (selected.tool?.includes('k8s')) {
+    return 'Kubernetes Agent';
+  }
+  return selected.agent === 'DevOps Agent'
+    ? 'Kubernetes Agent'
+    : getAgentDisplayName(selected.agent ?? 'Chat Agent');
 }

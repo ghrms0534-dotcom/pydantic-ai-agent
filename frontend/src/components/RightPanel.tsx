@@ -1,17 +1,19 @@
 import type { ReactNode } from 'react';
 import { AlertCircle, CheckCircle2, Circle } from 'lucide-react';
 
-import type { DashboardSettings, ToolInfo } from '../types/chat';
-import { getAgentCapabilities } from '../utils/toolDisplay';
+import type { ObservabilityMetrics } from '../api/client';
+import type { AgentInfo, DashboardSettings, ToolInfo } from '../types/chat';
+import { getAgentCapabilities, getAgentDisplayName, getToolDisplayName } from '../utils/toolDisplay';
 
 type RightPanelProps = {
   settings: DashboardSettings;
-  tools: ToolInfo[];
+  agents: AgentInfo[];
+  metrics: ObservabilityMetrics;
   recentAgent: string;
 };
 
-export function RightPanel({ tools, recentAgent }: RightPanelProps) {
-  const capabilities = getAgentCapabilities(tools);
+export function RightPanel({ agents, metrics, recentAgent }: RightPanelProps) {
+  const capabilities = getAgentCapabilities(agents);
 
   return (
     <aside className="surface min-h-0 overflow-y-auto border-l p-4">
@@ -39,10 +41,11 @@ export function RightPanel({ tools, recentAgent }: RightPanelProps) {
       </Panel>
 
       <Panel title="실행 정보">
-        <InfoRow label="최근 실행" value={formatRecentAgent(recentAgent)} />
-        <InfoRow label="총 요청" value="14회" />
-        <InfoRow label="평균 응답" value="1.3초" />
-        <InfoRow label="사용 시간" value="18분" />
+        <InfoRow label="최근 Agent" value={formatRecentAgent(recentAgent)} />
+        <InfoRow label="최근 Tool" value={metrics.last_tool_name ? getToolDisplayName(metrics.last_tool_name) : '-'} />
+        <InfoRow label="총 요청" value={`${metrics.total_requests}회`} />
+        <InfoRow label="평균 응답" value={`${Math.round(metrics.average_latency_ms)}ms`} />
+        <InfoRow label="실패 Tool" value={`${metrics.failed_tool_calls}회`} />
       </Panel>
     </aside>
   );
@@ -80,5 +83,8 @@ function formatRecentAgent(agent: string): string {
   if (agent === 'DevOps Agent') {
     return 'Kubernetes Agent';
   }
-  return agent;
+  if (agent === 'Orchestrator Agent') {
+    return 'Chat Agent';
+  }
+  return getAgentDisplayName(agent);
 }

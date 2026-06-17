@@ -19,6 +19,7 @@ type SidebarProps = {
   onRestoreSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
   onClearSessions: () => void;
+  onClearMemory: () => void;
   onSettingsChange: (settings: DashboardSettings) => void;
 };
 
@@ -35,6 +36,7 @@ export function Sidebar({
   onRestoreSession,
   onDeleteSession,
   onClearSessions,
+  onClearMemory,
   onSettingsChange,
 }: SidebarProps) {
   return (
@@ -76,6 +78,7 @@ export function Sidebar({
             onRestoreSession={onRestoreSession}
             onDeleteSession={onDeleteSession}
             onClearSessions={onClearSessions}
+            onClearMemory={onClearMemory}
           />
         )}
         {activeView === 'settings' && <SettingsPanel settings={settings} onSettingsChange={onSettingsChange} />}
@@ -155,25 +158,37 @@ function HistoryPanel({
   onRestoreSession,
   onDeleteSession,
   onClearSessions,
+  onClearMemory,
 }: {
   sessions: ChatSession[];
   currentSessionId: string;
   onRestoreSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
   onClearSessions: () => void;
+  onClearMemory: () => void;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
         <h3 className="text-muted text-xs font-semibold uppercase">대화 기록</h3>
-        <button
-          className="text-muted rounded p-1 hover:bg-slate-100 hover:text-red-600 dark:hover:bg-slate-800"
-          onClick={onClearSessions}
-          title="전체 삭제"
-          aria-label="전체 대화 기록 삭제"
-        >
-          <Trash2 size={15} aria-hidden="true" />
-        </button>
+        <div className="flex gap-1">
+          <button
+            className="text-muted rounded p-1 hover:bg-slate-100 dark:hover:bg-slate-800"
+            onClick={onClearMemory}
+            title="현재 Memory 초기화"
+            aria-label="현재 대화 Memory 초기화"
+          >
+            <Circle size={15} aria-hidden="true" />
+          </button>
+          <button
+            className="text-muted rounded p-1 hover:bg-slate-100 hover:text-red-600 dark:hover:bg-slate-800"
+            onClick={onClearSessions}
+            title="전체 삭제"
+            aria-label="전체 대화 기록 삭제"
+          >
+            <Trash2 size={15} aria-hidden="true" />
+          </button>
+        </div>
       </div>
       {sessions.length === 0 ? (
         <p className="text-muted text-sm">저장된 대화가 없습니다.</p>

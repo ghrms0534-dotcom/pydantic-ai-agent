@@ -1,4 +1,5 @@
 ﻿import re
+from dataclasses import dataclass
 from enum import Enum
 
 from pydantic_ai import Agent
@@ -14,6 +15,7 @@ from backend.app.tools.devops.k8s_tools import (
     get_k8s_services,
     summarize_k8s_pods,
 )
+from backend.app.tools.local_tools import get_docker_status, get_memory_status, get_system_status, list_project_files
 from backend.app.tools.validation import run_with_validation_retry
 
 
@@ -65,6 +67,51 @@ K8S_NEGATION_KEYWORDS = ["조회하지 말고", "호출하지 말고", "실행�
 MULTI_AGENT_KEYWORDS = ["둘 다", "모두", "같이", "동시에", "비교", "합쳐"]
 API_AGENT_KEYWORDS = ["api", "fastapi", "endpoint", "backend", "router", "controller"]
 K8S_EXPLANATION = "쿠버네티스는 컨테이너화된 애플리케이션을 배포, 확장, 복구, 관리하기 위한 컨테이너 오케스트레이션 플랫폼입니다."
+
+
+@dataclass(frozen=True)
+class RegistryItem:
+    name: str
+    display_name: str
+    description: str
+    category: str
+    source: str
+
+
+REGISTERED_TOOLS = [
+    RegistryItem("get_git_status", "Git Agent", "Run git status --short.", "devops", "builtin"),
+    RegistryItem("get_k8s_pods", "Kubernetes Agent", "Run kubectl get pods -A.", "devops", "builtin"),
+    RegistryItem("get_k8s_deployments", "Kubernetes Deployments", "Run kubectl get deployments -A.", "devops", "builtin"),
+    RegistryItem("get_k8s_services", "Kubernetes Services", "Run kubectl get services -A.", "devops", "builtin"),
+    RegistryItem("get_k8s_namespaces", "Kubernetes Namespaces", "Run kubectl get namespaces.", "devops", "builtin"),
+    RegistryItem("get_k8s_nodes", "Kubernetes Nodes", "Run kubectl get nodes.", "devops", "builtin"),
+    RegistryItem("summarize_k8s_pods", "Kubernetes Pod Summary", "Summarize Kubernetes pod status.", "devops", "builtin"),
+    RegistryItem("get_github_repo_info", "GitHub Agent", "Fetch public GitHub repository information.", "api", "builtin"),
+    RegistryItem("get_public_ip", "Network Tool", "Fetch the current public IP address.", "api", "builtin"),
+    RegistryItem("list_project_files", "File Agent", "List project files.", "file", "builtin"),
+    RegistryItem("get_memory_status", "System Agent", "Show SQLite memory status.", "system", "builtin"),
+    RegistryItem("get_docker_status", "Docker Agent", "Show Docker container status.", "devops", "builtin"),
+    RegistryItem("get_system_status", "System Agent", "Show basic system status.", "system", "builtin"),
+]
+
+REGISTERED_AGENTS = [
+    RegistryItem("git", "Git Agent", "Git 저장소 상태 확인", "agent", "agent"),
+    RegistryItem("github", "GitHub Agent", "GitHub 저장소 정보 조회", "agent", "agent"),
+    RegistryItem("kubernetes", "Kubernetes Agent", "Kubernetes 리소스 조회", "agent", "agent"),
+    RegistryItem("docker", "Docker Agent", "Docker 환경 관리", "agent", "agent"),
+]
+
+
+def registered_tools() -> list[RegistryItem]:
+    return REGISTERED_TOOLS.copy()
+
+
+def registered_agents() -> list[RegistryItem]:
+    return REGISTERED_AGENTS.copy()
+
+
+def is_registered_tool(tool_name: str) -> bool:
+    return any(tool.name == tool_name for tool in REGISTERED_TOOLS)
 
 
 def register_devops_tools(agent: Agent[None, str]) -> None:
@@ -226,6 +273,40 @@ def route_tool_call(prompt: str) -> str | None:
     """Route clear prompts to any local tool for backward compatibility."""
 
     return route_devops_tool_call(prompt) or route_api_tool_call(prompt)
+
+
+def execute_registered_tool(tool_name: str, prompt: str, session_id: str | None = None) -> str:
+    if tool_name == "get_git_status":
+        return get_git_status()
+    if tool_name == "get_k8s_pods":
+        return get_k8s_pods(namespace=_extract_namespace(prompt.lower()))
+    if tool_name == "get_k8s_deployments":
+        return get_k8s_deployments()
+    if tool_name == "get_k8s_services":
+        return get_k8s_services()
+    if tool_name == "get_k8s_namespaces":
+        return get_k8s_namespaces()
+    if tool_name == "get_k8s_nodes":
+        return get_k8s_nodes()
+    if tool_name == "summarize_k8s_pods":
+        return summarize_k8s_pods()
+    if tool_name == "get_github_repo_info":
+        repo_match = REPO_PATTERN.search(prompt)
+        if not repo_match:
+            return "GitHub 저장소를 확인하려면 owner/repo 형식의 저장소명을 함께 입력해주세요."
+        owner, repo = repo_match.groups()
+        return get_github_repo_info(owner=owner, repo=repo)
+    if tool_name == "get_public_ip":
+        return get_public_ip()
+    if tool_name == "list_project_files":
+        return list_project_files()
+    if tool_name == "get_memory_status":
+        return get_memory_status(session_id)
+    if tool_name == "get_docker_status":
+        return get_docker_status()
+    if tool_name == "get_system_status":
+        return get_system_status()
+    return f"등록되지 않은 tool입니다: {tool_name}"
 
 
 def _has_query_action(normalized: str) -> bool:

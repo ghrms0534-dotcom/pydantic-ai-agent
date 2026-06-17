@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     fast_model: str | None = Field(default=None)
     korean_model: str | None = Field(default=None)
     reasoning_model: str | None = Field(default=None)
+    redis_url: str = Field(default="redis://localhost:6379/0")
+    worker_mode: str = Field(default="direct")
 
     @property
     def ollama_openai_base_url(self) -> str:

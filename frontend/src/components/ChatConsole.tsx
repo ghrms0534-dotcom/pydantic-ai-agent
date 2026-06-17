@@ -3,14 +3,15 @@ import { Activity, CheckCircle2, Circle, Copy, Loader2, Send } from 'lucide-reac
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-import type { ChatMessage, ToolInfo } from '../types/chat';
+import type { AgentInfo, ChatMessage } from '../types/chat';
+import { getToolDisplayName } from '../utils/toolDisplay';
 
 type ChatConsoleProps = {
   messages: ChatMessage[];
   input: string;
   loading: boolean;
   error: string | null;
-  tools: ToolInfo[];
+  agents: AgentInfo[];
   onInputChange: (value: string) => void;
   onSend: () => void;
 };
@@ -42,7 +43,7 @@ const markdownComponents: Components = {
   },
 };
 
-export function ChatConsole({ messages, input, loading, error, tools, onInputChange, onSend }: ChatConsoleProps) {
+export function ChatConsole({ messages, input, loading, error, agents, onInputChange, onSend }: ChatConsoleProps) {
   const [orchestratorOpen, setOrchestratorOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -69,11 +70,9 @@ export function ChatConsole({ messages, input, loading, error, tools, onInputCha
             {orchestratorOpen && (
               <div className="card absolute right-0 top-11 z-20 w-72 p-4">
                 <div className="mb-3 text-sm font-semibold">에이전트 연결 상태</div>
-                <StatusLine label="Chat Agent" active />
-                <StatusLine label="Git Agent" active={isToolActive(tools, 'git_status')} />
-                <StatusLine label="Kubernetes Agent" active={isToolActive(tools, 'k8s')} />
-                <StatusLine label="GitHub Agent" active={isToolActive(tools, 'github')} />
-                <StatusLine label="Docker Agent" active={false} />
+                {agents.map((agent) => (
+                  <StatusLine key={agent.name} label={getToolDisplayName(agent)} active={agent.status === 'active'} />
+                ))}
               </div>
             )}
           </div>
@@ -192,8 +191,4 @@ function StatusLine({ label, active }: { label: string; active: boolean }) {
       </span>
     </div>
   );
-}
-
-function isToolActive(tools: ToolInfo[], keyword: string): boolean {
-  return tools.some((tool) => tool.name.includes(keyword) && tool.status === 'active');
 }

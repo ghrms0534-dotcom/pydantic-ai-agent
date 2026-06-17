@@ -12,6 +12,7 @@ KUBECTL_ERROR_MARKERS = (
     "kubernetes 명령 실행에 실패했습니다",
 )
 POD_STATUS_MARKERS = ("running", "pending", "error", "crashloopbackoff", "completed", "failed")
+GENERIC_ERROR_MARKERS = ("exception", "traceback", "failed", "timeout")
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,9 @@ def validate_tool_result(result: Any, tool_name: str | None = None) -> ToolValid
     marker_error = _first_marker(lowered)
     if marker_error:
         return _classify_error(text)
+
+    if "error" in lowered or any(marker in lowered for marker in GENERIC_ERROR_MARKERS):
+        return _fail("error", "요청 처리 중 오류가 발생했습니다. 입력이나 실행 환경을 확인해주세요.")
 
     if tool_name == "get_k8s_pods" and not _looks_like_pod_output(lowered):
         return _fail("unexpected_kubectl_format", "예상한 kubectl 출력 형식이 아닙니다.")
