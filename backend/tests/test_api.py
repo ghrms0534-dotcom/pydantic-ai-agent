@@ -10,7 +10,7 @@ from backend.app import queue as task_queue
 from backend.app.agent import memory, observability, parallel, planner, runner, tools
 from backend.app.api.main import app
 from backend.app.config import get_settings
-from backend.app.tools import registry
+from backend.app.tools import local_tools, registry
 
 
 client = TestClient(app)
@@ -211,6 +211,7 @@ def test_api_tools_returns_discovered_tools_and_agents() -> None:
     assert {"name", "display_name", "description", "category", "enabled", "source"} <= data["tools"][0].keys()
     assert [agent["display_name"] for agent in data["agents"]] == [
         "Chat Agent",
+        "Coding Agent",
         "Git Agent",
         "GitHub Agent",
         "Kubernetes Agent",
@@ -301,16 +302,514 @@ def test_docker_request_uses_docker_tool(monkeypatch) -> None:
     assert trace["selected_tool"] == "get_docker_status"
 
 
+def test_code_request_uses_coding_agent(monkeypatch) -> None:
+    calls: list[str] = []
+
+    async def fake_run_agent(message: str, model_name: str | None = None) -> str:
+        calls.append(message)
+        return "코드 설명입니다."
+
+    monkeypatch.setattr(runner, "run_agent", fake_run_agent)
+
+    response = client.post("/api/chat", json={"message": "explain this code", "session_id": "coding-flow"})
+    trace = client.get("/api/observability/traces").json()["traces"][0]
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "코드 설명입니다."
+    assert trace["selected_agent"] == "Coding Agent"
+    assert trace["selected_tool"] is None
+    assert "You are Coding Agent" in calls[0]
+
+
+def test_code_conversion_uses_coding_agent(monkeypatch) -> None:
+    async def fake_run_agent(message: str, model_name: str | None = None) -> str:
+        assert "Always answer in Korean" in message
+        assert "Do not claim you edited files" in message
+        assert "C 소스를 Java로 바꿔줘" in message
+        return "Java 변환 예시입니다."
+
+    monkeypatch.setattr(runner, "run_agent", fake_run_agent)
+
+    response = client.post(
+        "/api/chat",
+        json={"message": "C 소스를 Java로 바꿔줘 int add(int a,int b){return a+b;}", "session_id": "coding-convert"},
+    )
+    trace = client.get("/api/observability/traces").json()["traces"][0]
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "Java 변환 예시입니다."
+    assert trace["selected_agent"] == "Coding Agent"
+
+
+def test_coding_agent_read_file_tool(monkeypatch) -> None:
+    monkeypatch.setattr(registry, "read_file", lambda path: f"read file: {path}")
+
+    async def fake_run_agent(message: str, model_name: str | None = None) -> str:
+        assert "read_file" in message
+        assert "read file: README.md" in message
+        return "README.md 파일 요약입니다."
+
+    monkeypatch.setattr(runner, "run_agent", fake_run_agent)
+
+    response = client.post("/api/chat", json={"message": "read_file path=README.md", "session_id": "coding-read"})
+    trace = client.get("/api/observability/traces").json()["traces"][0]
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "README.md 파일 요약입니다."
+    assert trace["selected_agent"] == "Coding Agent"
+    assert trace["selected_tool"] == "read_file"
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_tool", "tool_output"),
+    [
+        ("프로젝트 구조 보여줘", "list_directory", "app/\nREADME.md"),
+        ("main.py 읽어줘", "read_file", "print('hello')"),
+        ("전체 코드에서 login 찾아줘", "search_code", "backend/app/auth.py: login"),
+    ],
+)
+def test_coding_file_analysis_requests_use_read_only_tools(monkeypatch, message, expected_tool, tool_output) -> None:
+    monkeypatch.setattr(registry, "list_directory", lambda path=".": tool_output)
+    monkeypatch.setattr(registry, "read_file", lambda path: tool_output)
+    monkeypatch.setattr(registry, "search_code", lambda keyword: tool_output)
+
+    async def fake_run_agent(prompt: str, model_name: str | None = None) -> str:
+        assert expected_tool in prompt
+        assert tool_output in prompt
+        return "파일 도구 결과 요약입니다."
+
+    monkeypatch.setattr(runner, "run_agent", fake_run_agent)
+
+    response = client.post("/api/chat", json={"message": message, "session_id": f"coding-{expected_tool}"})
+    trace = client.get("/api/observability/traces").json()["traces"][0]
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "파일 도구 결과 요약입니다."
+    assert trace["selected_agent"] == "Coding Agent"
+    assert trace["selected_tool"] == expected_tool
+
+
+def test_coding_read_only_tools_are_discovered() -> None:
+    response = client.get("/api/tools")
+    tool_names = {tool["name"] for tool in response.json()["tools"]}
+
+    assert {"list_directory", "read_file", "search_code"} <= tool_names
+
+
+def test_read_file_blocks_path_traversal() -> None:
+    assert "root 밖" in local_tools.read_file("../pyproject.toml")
+
+
+def test_read_only_file_tools_security_guards() -> None:
+    assert "민감 정보" in local_tools.read_file(".env")
+    assert "제외된 디렉터리" in local_tools.read_file("node_modules/package.json")
+    assert "backend" in local_tools.list_directory("backend")
+    assert "login" in local_tools.search_code("login")
+
+
+def test_read_file_blocks_binary_file(monkeypatch) -> None:
+    monkeypatch.setattr(local_tools, "_is_binary_file", lambda path: True)
+
+    assert "읽을 수" in local_tools.read_file("pyproject.toml")
+
+
+def test_coding_write_tools_modify_root_files_only(monkeypatch) -> None:
+    root = Path(environ["TEMP"]) / "maos-write-tools"
+    root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(local_tools, "ROOT", root)
+
+    result = local_tools.write_file("sample.txt", "hello")
+    assert "Diff:" in result
+    assert (root / "sample.txt").read_text(encoding="utf-8") == "hello"
+
+    result = local_tools.replace_in_file("sample.txt", "hello", "hi")
+    assert "+hi" in result
+    assert (root / "sample.txt").read_text(encoding="utf-8") == "hi"
+
+    assert "root" in local_tools.write_file("../outside.txt", "no")
+    assert "민감 정보" in local_tools.write_file(".env", "TOKEN=x")
+
+
+def test_replace_in_file_requires_exact_single_match(monkeypatch) -> None:
+    root = Path(environ["TEMP"]) / "maos-write-tools"
+    root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(local_tools, "ROOT", root)
+    (root / "sample.txt").write_text("same\nsame\n", encoding="utf-8")
+
+    result = local_tools.replace_in_file("sample.txt", "same", "other")
+
+    assert "수정하지 않았습니다" in result
+    assert (root / "sample.txt").read_text(encoding="utf-8") == "same\nsame\n"
+
+
+def test_write_tools_block_unsafe_or_unclear_paths(monkeypatch) -> None:
+    root = Path(environ["TEMP"]) / "maos-write-tools"
+    root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(local_tools, "ROOT", root)
+
+    assert "경로" in local_tools.write_file("", "x")
+    assert "root" in local_tools.write_file("../.env", "x")
+    assert "민감 정보" in local_tools.write_file(".env", "x")
+    assert "민감 정보" in local_tools.write_file("credentials.txt", "x")
+    assert "제외" in local_tools.write_file("node_modules/a.js", "x")
+    assert "텍스트 파일" in local_tools.write_file("safe.py", "\0")
+
+
+def test_review_or_analysis_requests_do_not_select_write_tools() -> None:
+    assert registry.coding_tool_for_prompt("이 코드 리뷰해줘") is None
+    assert registry.coding_tool_for_prompt("sample.py 분석해줘") == "read_file"
+    assert registry.coding_tool_for_prompt("sample.py 설명해줘") == "read_file"
+
+
+def test_coding_write_registry_requires_explicit_edit_and_payload(monkeypatch) -> None:
+    monkeypatch.setattr(registry, "write_file", lambda path, content: pytest.fail("write_file should not run"))
+    monkeypatch.setattr(registry, "replace_in_file", lambda path, old_text, new_text: pytest.fail("replace_in_file should not run"))
+
+    assert "수정하지 않았습니다" in registry.execute_registered_tool("write_file", 'backend/app/x.py content="x"')
+    assert "수정하지 않았습니다" in registry.execute_registered_tool("write_file", 'backend/app/x.py 수정해줘')
+    assert "수정하지 않았습니다" in registry.execute_registered_tool("replace_in_file", 'old_text="a" new_text="b" 수정해줘')
+
+
+def test_coding_write_tools_are_discovered() -> None:
+    response = client.get("/api/tools")
+    tool_names = {tool["name"] for tool in response.json()["tools"]}
+
+    assert {"write_file", "replace_in_file"} <= tool_names
+
+
+def test_run_validation_allows_only_safe_commands(monkeypatch) -> None:
+    class Result:
+        returncode = 1
+        stdout = "ok"
+        stderr = "failed"
+
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return Result()
+
+    monkeypatch.setattr(local_tools.shutil, "which", lambda command: f"/bin/{command}")
+    monkeypatch.setattr(local_tools.subprocess, "run", fake_run)
+
+    result = local_tools.run_validation("pytest")
+
+    assert "exit_code=1" in result
+    assert "stdout:\nok" in result
+    assert calls[0][0] == ["pytest"]
+    assert calls[0][1]["cwd"] == local_tools.ROOT.resolve()
+    assert "허용되지 않은" in local_tools.run_validation("git push")
+    assert "허용되지 않은" in local_tools.run_validation("npm install")
+    assert "허용된 검증 명령" in local_tools.run_validation("python server.py")
+
+
+def test_run_validation_returns_timeout(monkeypatch) -> None:
+    def fake_run(*args, **kwargs):
+        raise local_tools.subprocess.TimeoutExpired(cmd=args[0], timeout=1, output="partial", stderr="late")
+
+    monkeypatch.setattr(local_tools.shutil, "which", lambda command: f"/bin/{command}")
+    monkeypatch.setattr(local_tools.subprocess, "run", fake_run)
+
+    assert "exit_code=timeout" in local_tools.run_validation("python -m pytest")
+
+
+def test_run_validation_tool_is_discovered() -> None:
+    response = client.get("/api/tools")
+    tool_names = {tool["name"] for tool in response.json()["tools"]}
+
+    assert "run_validation" in tool_names
+
+
+def test_git_diff_is_added_after_write(monkeypatch) -> None:
+    monkeypatch.setattr(registry, "write_file", lambda path, content: "changed\nDiff:\n-a\n+b")
+    monkeypatch.setattr(registry, "get_git_diff", lambda path: f"diff -- {path}")
+    monkeypatch.setattr(registry, "run_validation", lambda command: "exit_code=0\nstdout:\nok\nstderr:")
+
+    result = registry.execute_registered_tool("write_file", 'backend/app/x.py 수정해줘 content="x"')
+
+    assert "Git Diff:\ndiff -- backend/app/x.py" in result
+    assert "Validation:" in result
+
+
+def test_coding_edit_request_uses_replace_tool_when_text_is_explicit(monkeypatch) -> None:
+    monkeypatch.setattr(registry, "replace_in_file", lambda path, old_text, new_text: f"replaced {path}: {old_text}->{new_text}\nDiff:\n-ok\n+good")
+    monkeypatch.setattr(registry, "run_validation", lambda command: f"exit_code=0\nstdout:\n{command} ok\nstderr:")
+    monkeypatch.setattr(registry, "get_git_diff", lambda path: f"git diff for {path}")
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "message": 'sample.py 수정해줘 old_text="ok" new_text="good"',
+            "session_id": "coding-replace-flow",
+        },
+    )
+    trace = client.get("/api/observability/traces").json()["traces"][0]
+
+    assert response.status_code == 200
+    assert "Diff:" in response.json()["answer"]
+    assert "Git Diff:" in response.json()["answer"]
+    assert "$ pytest" in response.json()["answer"]
+    assert trace["selected_agent"] == "Coding Agent"
+    assert trace["selected_tool"] == "replace_in_file"
+
+
+def test_coding_edit_validation_can_be_skipped(monkeypatch) -> None:
+    monkeypatch.setattr(registry, "replace_in_file", lambda path, old_text, new_text: "changed\nDiff:\n-a\n+b")
+    monkeypatch.setattr(registry, "get_git_diff", lambda path: "git diff")
+    monkeypatch.setattr(registry, "run_validation", lambda command: pytest.fail("validation should not run"))
+
+    response = client.post(
+        "/api/chat",
+        json={"message": 'backend/app/x.py 수정해줘 old_text="a" new_text="b" 검증하지 마', "session_id": "coding-no-validation"},
+    )
+
+    assert response.status_code == 200
+    assert "Git Diff:" in response.json()["answer"]
+    assert "Validation:" not in response.json()["answer"]
+
+
+def test_frontend_edit_runs_build_validation(monkeypatch) -> None:
+    monkeypatch.setattr(registry, "write_file", lambda path, content: "changed\nDiff:\n-a\n+b")
+    monkeypatch.setattr(registry, "get_git_diff", lambda path: f"git diff for {path}")
+    monkeypatch.setattr(registry, "run_validation", lambda command: f"exit_code=0\nstdout:\n{command} ok\nstderr:")
+
+    response = client.post(
+        "/api/chat",
+        json={"message": 'frontend/src/App.tsx 수정해줘 content="export default function App(){return null}"', "session_id": "coding-frontend-validation"},
+    )
+
+    assert response.status_code == 200
+    assert "$ npm run build" in response.json()["answer"]
+
+
+def test_coding_edit_self_corrects_once_after_validation_failure(monkeypatch) -> None:
+    replace_calls = []
+    validation_calls = []
+
+    def fake_replace(path, old_text, new_text):
+        replace_calls.append((path, old_text, new_text))
+        return f"changed {old_text}->{new_text}\nDiff:\n-{old_text}\n+{new_text}"
+
+    def fake_validation(command):
+        validation_calls.append(command)
+        if len(validation_calls) == 1:
+            return "exit_code=1\nstdout:\nfailed assertion\nstderr:\n"
+        return "exit_code=0\nstdout:\npassed\nstderr:"
+
+    async def fake_run_agent(prompt: str, model_name: str | None = None) -> str:
+        assert "validation" in prompt.lower()
+        return 'replace_in_file path=backend/app/x.py old_text="bad" new_text="good"'
+
+    monkeypatch.setattr(registry, "replace_in_file", fake_replace)
+    monkeypatch.setattr(registry, "get_git_diff", lambda path: f"git diff for {path}")
+    monkeypatch.setattr(registry, "run_validation", fake_validation)
+    monkeypatch.setattr(runner, "run_agent", fake_run_agent)
+
+    response = client.post(
+        "/api/chat",
+        json={"message": 'backend/app/x.py 수정해줘 old_text="bug" new_text="bad"', "session_id": "coding-self-correct"},
+    )
+
+    assert response.status_code == 200
+    assert "Self-correction: retry=true" in response.json()["answer"]
+    assert "exit_code=0" in response.json()["answer"]
+    assert replace_calls == [("backend/app/x.py", "bug", "bad"), ("backend/app/x.py", "bad", "good")]
+    assert validation_calls == ["pytest", "pytest"]
+
+
+def test_coding_edit_self_correction_does_not_retry_without_fix(monkeypatch) -> None:
+    monkeypatch.setattr(registry, "replace_in_file", lambda path, old_text, new_text: "changed\nDiff:\n-a\n+b")
+    monkeypatch.setattr(registry, "get_git_diff", lambda path: "git diff")
+    monkeypatch.setattr(registry, "run_validation", lambda command: "exit_code=1\nstdout:\nfailed\nstderr:")
+
+    async def fake_run_agent(prompt: str, model_name: str | None = None) -> str:
+        return "NO_FIX"
+
+    monkeypatch.setattr(runner, "run_agent", fake_run_agent)
+
+    response = client.post(
+        "/api/chat",
+        json={"message": 'backend/app/x.py 수정해줘 old_text="a" new_text="b"', "session_id": "coding-no-fix"},
+    )
+
+    assert response.status_code == 200
+    assert "Self-correction: retry=false" in response.json()["answer"]
+
+
+def test_coding_edit_request_without_patch_reads_file_only(monkeypatch) -> None:
+    monkeypatch.setattr(registry, "read_file", lambda path: f"current content from {path}")
+    monkeypatch.setattr(registry, "write_file", lambda path, content: pytest.fail("write_file should not run"))
+
+    async def fake_run_agent(prompt: str, model_name: str | None = None) -> str:
+        assert "current content from sample.py" in prompt
+        return "수정안입니다.\n```python\nprint('ok')\n```"
+
+    monkeypatch.setattr(runner, "run_agent", fake_run_agent)
+
+    response = client.post("/api/chat", json={"message": "sample.py 수정해줘", "session_id": "coding-edit-read-only"})
+    trace = client.get("/api/observability/traces").json()["traces"][0]
+
+    assert response.status_code == 200
+    assert "수정안입니다" in response.json()["answer"]
+    assert trace["selected_agent"] == "Coding Agent"
+    assert trace["selected_tool"] == "read_file"
+
+
+def test_docker_run_request_uses_run_tool(monkeypatch) -> None:
+    monkeypatch.setattr(registry, "docker_run", lambda image, name="", detach=True: f"docker run: {image} {name} {detach}")
+
+    response = client.post(
+        "/api/chat",
+        json={"message": "docker run image=redis:7 name=myredis confirm=true", "session_id": "docker-run-flow"},
+    )
+    trace = client.get("/api/observability/traces").json()["traces"][0]
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "docker run: redis:7 myredis True"
+    assert trace["selected_agent"] == "Docker Agent"
+    assert trace["selected_tool"] == "docker_run"
+
+
+def test_docker_logs_request_uses_logs_tool(monkeypatch) -> None:
+    monkeypatch.setattr(registry, "docker_logs", lambda container: f"docker logs: {container}")
+
+    response = client.post("/api/chat", json={"message": "docker logs api", "session_id": "docker-logs-flow"})
+    trace = client.get("/api/observability/traces").json()["traces"][0]
+    metrics = client.get("/api/observability/metrics").json()
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "docker logs: api"
+    assert trace["selected_agent"] == "Docker Agent"
+    assert trace["selected_tool"] == "docker_logs"
+    assert metrics["last_tool_name"] == "docker_logs"
+
+
+def test_docker_action_tools_are_discovered() -> None:
+    response = client.get("/api/tools")
+    tool_names = {tool["name"] for tool in response.json()["tools"]}
+
+    assert {
+        "docker_build",
+        "docker_run",
+        "docker_logs",
+        "docker_stop",
+        "docker_rm",
+        "docker_compose_up",
+        "docker_compose_down",
+    } <= tool_names
+
+
 def test_git_request_uses_git_tool(monkeypatch) -> None:
     monkeypatch.setattr(registry, "get_git_status", lambda: "Git 상태 요약입니다.\n- 수정된 파일: 1개\n- 커밋되지 않은 변경사항 있음")
 
     response = client.post("/api/chat", json={"message": "Git 상태 알려줘", "session_id": "git-flow"})
     trace = client.get("/api/observability/traces").json()["traces"][0]
+    metrics = client.get("/api/observability/metrics").json()
 
     assert response.status_code == 200
     assert "Git 상태 요약" in response.json()["answer"]
     assert trace["selected_agent"] == "Git Agent"
     assert trace["selected_tool"] == "get_git_status"
+    assert metrics["last_tool_name"] == "git_status"
+
+
+def test_git_commit_request_uses_commit_tool(monkeypatch) -> None:
+    monkeypatch.setattr(registry, "git_commit", lambda message: f"commit 실행: {message}")
+
+    response = client.post("/api/chat", json={"message": 'git commit -m "test commit" confirm=true', "session_id": "git-commit-flow"})
+    trace = client.get("/api/observability/traces").json()["traces"][0]
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "commit 실행: test commit"
+    assert trace["selected_agent"] == "Git Agent"
+    assert trace["selected_tool"] == "git_commit"
+
+
+def test_write_tool_requires_confirmation(monkeypatch) -> None:
+    monkeypatch.setattr(registry, "git_commit", lambda message: "should not run")
+
+    response = client.post("/api/chat", json={"message": 'git commit -m "test commit"', "session_id": "permission-write"})
+
+    assert response.status_code == 200
+    assert "confirm=true" in response.json()["answer"]
+
+
+def test_destructive_tool_is_blocked(monkeypatch) -> None:
+    monkeypatch.setattr(registry, "docker_rm", lambda container: "should not run")
+
+    response = client.post("/api/chat", json={"message": "docker rm container=myredis confirm=true", "session_id": "permission-block"})
+
+    assert response.status_code == 200
+    assert "기본 차단" in response.json()["answer"]
+
+
+def test_git_action_tools_are_discovered() -> None:
+    response = client.get("/api/tools")
+    tool_names = {tool["name"] for tool in response.json()["tools"]}
+
+    assert {
+        "git_add_all",
+        "git_commit",
+        "git_checkout",
+        "git_pull",
+        "git_push",
+        "git_merge",
+        "git_stash",
+    } <= tool_names
+
+
+def test_github_issue_request_uses_issue_tool(monkeypatch) -> None:
+    monkeypatch.setattr(registry, "create_github_issue", lambda owner, repo, title, body="": f"issue 생성: {owner}/{repo} {title}")
+
+    response = client.post(
+        "/api/chat",
+        json={"message": 'GitHub octocat/Hello-World issue title="Bug report" confirm=true', "session_id": "github-issue-flow"},
+    )
+    trace = client.get("/api/observability/traces").json()["traces"][0]
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "issue 생성: octocat/Hello-World Bug report"
+    assert trace["selected_agent"] == "GitHub Agent"
+    assert trace["selected_tool"] == "create_github_issue"
+
+
+def test_github_action_tools_are_discovered() -> None:
+    response = client.get("/api/tools")
+    tool_names = {tool["name"] for tool in response.json()["tools"]}
+
+    assert {
+        "create_github_pull_request",
+        "create_github_issue",
+        "create_github_release",
+        "create_github_branch",
+        "github_commit_push",
+    } <= tool_names
+
+
+def test_kubernetes_logs_request_uses_logs_tool(monkeypatch) -> None:
+    monkeypatch.setattr(registry, "kubectl_logs", lambda target: f"logs for {target}")
+
+    response = client.post("/api/chat", json={"message": "kubectl logs api-pod", "session_id": "k8s-logs-flow"})
+    trace = client.get("/api/observability/traces").json()["traces"][0]
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "logs for api-pod"
+    assert trace["selected_agent"] == "Kubernetes Agent"
+    assert trace["selected_tool"] == "kubectl_logs"
+
+
+def test_kubernetes_action_tools_are_discovered() -> None:
+    response = client.get("/api/tools")
+    tool_names = {tool["name"] for tool in response.json()["tools"]}
+
+    assert {
+        "kubectl_apply_file",
+        "kubectl_delete",
+        "kubectl_scale",
+        "kubectl_rollout_restart",
+        "kubectl_logs",
+        "kubectl_exec",
+    } <= tool_names
 
 
 def test_api_chat_stores_and_loads_session_memory(monkeypatch) -> None:
@@ -343,12 +842,33 @@ def test_memory_api_get_and_delete(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["memory"][0]["user_message"] == "hello"
+    assert response.json()["memory"][0]["validation_result"].startswith("ok:")
+    assert response.json()["memory"][0]["permission_result"] == "none"
+    assert response.json()["memory"][0]["final_answer_summary"] == "stored answer"
     assert response.json()["conversations"][0]["role"] == "user"
     assert response.json()["agent_memory"][0]["agent_name"] == "Chat Agent"
+    assert "validation_result:" in response.json()["agent_memory"][0]["memory_value"]
 
     cleared = client.delete("/api/memory/s2")
     assert cleared.status_code == 200
     assert client.get("/api/memory/s2").json()["memory"] == []
+
+
+def test_memory_redacts_secret_like_values() -> None:
+    memory.save_memory(
+        "secret-memory",
+        user_message="token=abc123 explain this",
+        assistant_answer="authorization: Bearer xyz",
+        selected_agent="Chat Agent",
+        executed_tool_name=None,
+        tool_result="api_key=hidden",
+    )
+
+    stored = client.get("/api/memory/secret-memory").json()["memory"][0]
+
+    assert "abc123" not in stored["user_message"]
+    assert "xyz" not in stored["assistant_answer"]
+    assert "hidden" not in stored["tool_result_summary"]
 
 
 def test_trace_api_returns_agent_messages(monkeypatch) -> None:

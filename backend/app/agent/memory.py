@@ -1,4 +1,5 @@
 import sqlite3
+import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from json import dumps, loads
@@ -22,6 +23,9 @@ class MemoryEntry:
     executed_tool_name: str | None
     tool_result_summary: str
     timestamp: str
+    validation_result: str = ""
+    permission_result: str = ""
+    final_answer_summary: str = ""
 
 
 _lock = Lock()
@@ -68,13 +72,19 @@ def save_memory(
     selected_agent: str | None,
     executed_tool_name: str | None,
     tool_result: str,
+    validation_result: str = "",
+    permission_result: str = "",
+    final_answer_summary: str = "",
 ) -> MemoryEntry:
     entry = MemoryEntry(
-        user_message=_clip(user_message),
-        assistant_answer=_clip(assistant_answer),
+        user_message=_clip(_sanitize(user_message)),
+        assistant_answer=_clip(_sanitize(assistant_answer)),
         selected_agent=selected_agent,
         executed_tool_name=executed_tool_name,
-        tool_result_summary=_clip(tool_result),
+        tool_result_summary=_clip(_sanitize(tool_result)),
+        validation_result=_clip(_sanitize(validation_result), 200),
+        permission_result=_clip(_sanitize(permission_result), 200),
+        final_answer_summary=_clip(_sanitize(final_answer_summary or assistant_answer), 300),
         timestamp=datetime.now(UTC).isoformat(),
     )
     key = normalize_session_id(session_id)
@@ -92,7 +102,7 @@ def save_memory(
                         key,
                         selected_agent,
                         executed_tool_name or "conversation",
-                        entry.tool_result_summary or entry.assistant_answer,
+                        _memory_value(entry),
                         entry.timestamp,
                     ),
                 )
@@ -274,6 +284,9 @@ def memory_context(session_id: str | None) -> str:
                 f"  agent: {entry.selected_agent or 'unknown'}",
                 f"  tool: {entry.executed_tool_name or 'none'}",
                 f"  tool_summary: {entry.tool_result_summary or 'none'}",
+                f"  validation: {entry.validation_result or 'unknown'}",
+                f"  permission: {entry.permission_result or 'unknown'}",
+                f"  final_summary: {entry.final_answer_summary or 'none'}",
             ]
         )
     return _clip("\n".join(lines), CONTEXT_LIMIT)
@@ -289,6 +302,26 @@ def with_memory_context(message: str, session_id: str | None) -> str:
 def _clip(text: str, limit: int = SUMMARY_LIMIT) -> str:
     text = text.strip()
     return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
+
+
+def _sanitize(text: str) -> str:
+    text = re.sub(r"(?i)authorization\s*[:=]\s*bearer\s+[a-z0-9._~+/=-]+", "authorization=[redacted]", text)
+    text = re.sub(r"(?i)(api[_-]?key|token|secret|password|authorization)\s*[:=]\s*['\"]?[^\s'\"&]+", r"\1=[redacted]", text)
+    text = re.sub(r"(?i)(bearer)\s+[a-z0-9._~+/=-]+", r"\1 [redacted]", text)
+    return text
+
+
+def _memory_value(entry: MemoryEntry) -> str:
+    return _clip(
+        "\n".join(
+            [
+                f"tool_result_summary: {entry.tool_result_summary or 'none'}",
+                f"validation_result: {entry.validation_result or 'unknown'}",
+                f"permission_result: {entry.permission_result or 'unknown'}",
+                f"final_answer_summary: {entry.final_answer_summary or 'none'}",
+            ]
+        )
+    )
 
 
 def _connect() -> sqlite3.Connection:
@@ -375,17 +408,30 @@ def _recent_memory_unlocked(session_id: str, limit: int) -> list[MemoryEntry]:
         if user["role"] != "user" or assistant["role"] != "assistant":
             continue
         agent = agent_by_index[min(len(entries), len(agent_by_index) - 1)] if agent_by_index else None
+        details = _parse_memory_value(agent["memory_value"] if agent else "")
         entries.append(
             MemoryEntry(
                 user_message=user["content"],
                 assistant_answer=assistant["content"],
                 selected_agent=agent["agent_name"] if agent else None,
                 executed_tool_name=agent["memory_key"] if agent else None,
-                tool_result_summary=agent["memory_value"] if agent else "",
+                tool_result_summary=details.get("tool_result_summary", agent["memory_value"] if agent else ""),
                 timestamp=assistant["created_at"],
+                validation_result=details.get("validation_result", ""),
+                permission_result=details.get("permission_result", ""),
+                final_answer_summary=details.get("final_answer_summary", ""),
             )
         )
     return entries[-limit:]
+
+
+def _parse_memory_value(value: str) -> dict[str, str]:
+    details: dict[str, str] = {}
+    for line in value.splitlines():
+        if ": " in line:
+            key, item = line.split(": ", 1)
+            details[key.strip()] = item.strip()
+    return details
 
 
 def _save_conversation_unlocked(

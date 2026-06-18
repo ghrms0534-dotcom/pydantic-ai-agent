@@ -32,7 +32,7 @@ async def chat_loop() -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run the local PydanticAI service agent.")
+    parser = argparse.ArgumentParser(description="Run MAOS, the Multi-Agent Autonomous Runtime.")
     parser.add_argument(
         "prompt",
         nargs="*",

@@ -17,9 +17,9 @@ import { defaultSettings, starterMessages } from './data/dashboard';
 import type { AgentActivityStep, AgentInfo, ChatMessage, ChatSession, DashboardSettings, ToolInfo } from './types/chat';
 import { fallbackAgents, getAgentDisplayName } from './utils/toolDisplay';
 
-const SETTINGS_KEY = 'pydantic-ai-dashboard:settings';
-const SESSIONS_KEY = 'pydantic-ai-dashboard:sessions';
-const CURRENT_SESSION_KEY = 'pydantic-ai-dashboard:current-session';
+const SETTINGS_KEY = 'maos-dashboard:settings';
+const SESSIONS_KEY = 'maos-dashboard:sessions';
+const CURRENT_SESSION_KEY = 'maos-dashboard:current-session';
 const emptyMetrics: ObservabilityMetrics = {
   total_requests: 0,
   total_tool_calls: 0,

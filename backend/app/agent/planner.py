@@ -43,26 +43,44 @@ def plan_message(message: str) -> PlannerResult:
     if _mentions_memory(normalized):
         return _plan("memory_status", "system", ["get_memory_status"], True, "Memory status request.", 0.86)
 
-    if _mentions_docker(normalized):
-        return _plan("docker_status", "docker", ["get_docker_status"], True, "Docker status request.", 0.86)
+    command_plan = _specific_command_plan(message)
+    if command_plan and not _mentions_code(normalized):
+        return command_plan
 
-    if _mentions_github(normalized, message):
-        return _plan("github_repo", "github", ["get_github_repo_info"], True, "GitHub repository request.", 0.84)
+    if _mentions_docker(normalized):
+        tool = registry.docker_tool_for_prompt(message) or "get_docker_status"
+        return _plan("docker_status", "docker", [tool], True, "Docker request.", 0.86)
 
     if registry.has_git_query_intent(message):
-        return _plan("git_status", "git", ["get_git_status"], True, "Git status request.", 0.9)
+        tool = registry.git_tool_for_prompt(message) or "get_git_status"
+        return _plan("git_status", "git", [tool], True, "Git request.", 0.9)
 
     if registry.has_k8s_query_intent(message):
-        return _plan("kubernetes_status", "kubernetes", [_suggested_tool(message) or "get_k8s_pods"], True, "Kubernetes status request.", 0.9)
+        return _plan("kubernetes_status", "kubernetes", [_suggested_tool(message) or "get_k8s_pods"], True, "Kubernetes request.", 0.9)
+
+    if _mentions_github_action(normalized, message):
+        tool = registry.github_tool_for_prompt(message) or "get_github_repo_info"
+        return _plan("github_repo", "github", [tool], True, "GitHub repository request.", 0.84)
+
+    coding_tool = registry.coding_tool_for_prompt(message)
+    if coding_tool:
+        return _plan("code_file_tool", "coding", [coding_tool], True, "Coding file tool request.", 0.86)
+
+    if _mentions_coding_edit(normalized):
+        return _plan("code_edit_suggestion", "coding", [], False, "Coding edit request without a clear file operation.", 0.76)
+
+    if _mentions_code(normalized):
+        return _plan("code", "coding", [], False, "Coding request.", 0.82)
+
+    if _mentions_github(normalized, message):
+        tool = registry.github_tool_for_prompt(message) or "get_github_repo_info"
+        return _plan("github_repo", "github", [tool], True, "GitHub repository request.", 0.84)
 
     if _mentions_file(normalized):
         return _plan("file_project_lookup", "file", ["list_project_files"], True, "File or project lookup request.", 0.82)
 
     if _mentions_system(normalized):
         return _plan("system_status", "system", ["get_public_ip"] if "ip" in normalized else ["get_system_status"], True, "System status request.", 0.78)
-
-    if _mentions_code(normalized):
-        return _plan("code", "chat", [], False, "Code analysis request.", 0.82)
 
     if _explicit_tool_request(normalized) or registry.has_api_intent(message):
         tool = _suggested_tool(message)
@@ -98,7 +116,7 @@ def _plan(
 def _coerce_plan(data: dict[str, Any]) -> PlannerResult:
     tools = [tool for tool in data.get("required_tools", []) if isinstance(tool, str) and registry.is_registered_tool(tool)]
     target_agent = str(data.get("target_agent") or "unknown").lower()
-    if target_agent not in {"chat", "git", "github", "kubernetes", "docker", "file", "system", "unknown"}:
+    if target_agent not in {"chat", "coding", "git", "github", "kubernetes", "docker", "file", "system", "unknown"}:
         target_agent = "unknown"
     if not tools:
         tools = _default_tools_for_agent(target_agent)
@@ -120,7 +138,7 @@ def _planner_prompt(user_message: str, available_agents: list[dict[str, Any]], a
     return (
         "Return only one JSON object. No markdown.\n"
         "Classify the user request and produce a small execution plan.\n"
-        'target_agent must be one of: "chat", "git", "github", "kubernetes", "docker", "file", "system", "unknown".\n'
+        'target_agent must be one of: "chat", "coding", "git", "github", "kubernetes", "docker", "file", "system", "unknown".\n'
         f"available_agents={agents}\n"
         f"available_tools={tools}\n"
         f"user_message={user_message}\n"
@@ -151,8 +169,18 @@ def _suggested_tool(message: str) -> str | None:
     normalized = message.lower()
     intent = registry.classify_intent(message)
 
+    command_tool = _specific_command_tool(message)
+    if command_tool:
+        return command_tool
+    coding_tool = registry.coding_tool_for_prompt(message)
+    if coding_tool:
+        return coding_tool
+
     if registry.has_git_query_intent(message):
-        return "get_git_status"
+        return registry.git_tool_for_prompt(message) or "get_git_status"
+    k8s_tool = registry.k8s_tool_for_prompt(message)
+    if k8s_tool:
+        return k8s_tool
     if intent == registry.Intent.SUMMARY:
         return "summarize_k8s_pods"
     if intent == registry.Intent.POD:
@@ -166,7 +194,7 @@ def _suggested_tool(message: str) -> str | None:
     if intent == registry.Intent.NODE:
         return "get_k8s_nodes"
     if "github" in normalized or registry.REPO_PATTERN.search(message):
-        return "get_github_repo_info"
+        return registry.github_tool_for_prompt(message) or "get_github_repo_info"
     if "public ip" in normalized or "공인 ip" in normalized or "퍼블릭 ip" in normalized:
         return "get_public_ip"
     if _mentions_memory(normalized):
@@ -174,10 +202,76 @@ def _suggested_tool(message: str) -> str | None:
     if _mentions_file(normalized):
         return "list_project_files"
     if _mentions_docker(normalized):
-        return "get_docker_status"
+        return registry.docker_tool_for_prompt(message) or "get_docker_status"
     if _mentions_system(normalized):
         return "get_system_status"
     return None
+
+
+def _specific_command_plan(message: str) -> PlannerResult | None:
+    tool = _specific_command_tool(message)
+    if not tool:
+        return None
+    target = "kubernetes" if tool.startswith(("kubectl_", "get_k8s_")) else "docker" if tool.startswith("docker_") or tool == "get_docker_status" else "git"
+    intent = {"get_git_status": "git_status", "get_k8s_pods": "kubernetes_status", "get_docker_status": "docker_status"}.get(tool, f"{target}_{tool}")
+    return _plan(intent, target, [tool], True, "Specific command request.", 0.92)
+
+
+def _specific_command_tool(message: str) -> str | None:
+    normalized = message.lower()
+    if _mentions_git(normalized):
+        for word, tool in [
+            ("status", "get_git_status"),
+            ("branch", "get_git_branch"),
+            ("add", "git_add_all"),
+            ("commit", "git_commit"),
+            ("checkout", "git_checkout"),
+            ("pull", "git_pull"),
+            ("push", "git_push"),
+            ("merge", "git_merge"),
+            ("stash", "git_stash"),
+        ]:
+            if word in normalized:
+                return tool
+    if _mentions_kubernetes_command(normalized):
+        if any(keyword in normalized for keyword in ["log", "logs", "로그"]):
+            return "kubectl_logs"
+        for word, tool in [
+            ("exec", "kubectl_exec"),
+            ("delete", "kubectl_delete"),
+            ("scale", "kubectl_scale"),
+            ("apply", "kubectl_apply_file"),
+            ("rollout restart", "kubectl_rollout_restart"),
+        ]:
+            if word in normalized:
+                return tool
+        if "get pods" in normalized or "pod" in normalized:
+            return "get_k8s_pods"
+    if _mentions_docker(normalized) or "compose" in normalized:
+        if "compose up" in normalized:
+            return "docker_compose_up"
+        if "compose down" in normalized:
+            return "docker_compose_down"
+        for word, tool in [
+            ("logs", "docker_logs"),
+            ("build", "docker_build"),
+            ("run", "docker_run"),
+            ("stop", "docker_stop"),
+            ("rm", "docker_rm"),
+            ("ps", "get_docker_status"),
+            ("status", "get_docker_status"),
+        ]:
+            if word in normalized:
+                return tool
+    return None
+
+
+def _mentions_git(normalized: str) -> bool:
+    return "git" in normalized or "깃" in normalized
+
+
+def _mentions_kubernetes_command(normalized: str) -> bool:
+    return any(keyword in normalized for keyword in ["kubectl", "kubernetes", "쿠버네티스", "pod", "pods"])
 
 
 def _mentions_file(normalized: str) -> bool:
@@ -185,7 +279,42 @@ def _mentions_file(normalized: str) -> bool:
 
 
 def _mentions_code(normalized: str) -> bool:
-    return any(keyword in normalized for keyword in ["코드", "소스", "함수", "분석", "수정", "작성", "code", "function"])
+    return any(
+        keyword in normalized
+        for keyword in [
+            "code",
+            "function",
+            "class",
+            "bug",
+            "debug",
+            "review",
+            "convert",
+            "python",
+            "java",
+            "javascript",
+            "fastapi",
+            "sql",
+            "코드",
+            "함수",
+            "버그",
+            "에러",
+            "디버깅",
+            "리뷰",
+            "변환",
+            "파이썬",
+            "자바",
+            "def ",
+            "class ",
+            "return ",
+            "import ",
+            "#include",
+            "public static void main",
+        ]
+    )
+
+
+def _mentions_coding_edit(normalized: str) -> bool:
+    return any(keyword in normalized for keyword in ["수정해줘", "바꿔줘", "적용해줘", "replace", "update", "edit", "convert this file", "refactor this file"])
 
 
 def _mentions_docker(normalized: str) -> bool:
@@ -198,6 +327,12 @@ def _mentions_memory(normalized: str) -> bool:
 
 def _mentions_github(normalized: str, message: str) -> bool:
     return "github" in normalized or "repo" in normalized or "repository" in normalized or "저장소" in normalized or registry.REPO_PATTERN.search(message) is not None
+
+
+def _mentions_github_action(normalized: str, message: str) -> bool:
+    return ("github" in normalized or registry.REPO_PATTERN.search(message) is not None) and any(
+        keyword in normalized for keyword in ["pull request", " pr ", "issue", "이슈", "release", "릴리즈"]
+    )
 
 
 def _mentions_system(normalized: str) -> bool:

@@ -4,6 +4,7 @@ from backend.app.agent import memory, spawn
 from backend.app.agent.role_agents import run_role_agent_flow
 from backend.app.api.schemas import PlannerResult
 from backend.app.queue import get_task_status, pop_task, update_task_status
+from backend.app.tools import registry
 
 
 async def execute_task(task_id: str) -> dict:
@@ -41,6 +42,9 @@ async def execute_task(task_id: str) -> dict:
         selected_agent=result.flow.selection_agent,
         executed_tool_name=tool_name,
         tool_result=result.raw_answer,
+        validation_result=(f"{result.validation.reason}: {result.validation.message}" if getattr(result, "validation", None) else "ok"),
+        permission_result=registry.permission_result(tool_name, message),
+        final_answer_summary=result.answer,
     )
     memory.save_agent_trace(session_id, "Worker Agent", "worker_task_completed", task_id, result.answer)
     return get_task_status(task_id) or {}

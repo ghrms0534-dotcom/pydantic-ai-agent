@@ -150,8 +150,15 @@ def _selected_tool(message: str) -> str | None:
     normalized = message.lower()
     intent = registry.classify_intent(message)
 
-    if registry.has_git_query_intent(message) and registry.is_registered_tool("get_git_status"):
-        return "get_git_status"
+    git_tool = registry.git_tool_for_prompt(message)
+    if git_tool and registry.is_registered_tool(git_tool):
+        return git_tool
+    k8s_tool = registry.k8s_tool_for_prompt(message)
+    if k8s_tool and registry.is_registered_tool(k8s_tool):
+        return k8s_tool
+    docker_tool = registry.docker_tool_for_prompt(message)
+    if docker_tool and registry.is_registered_tool(docker_tool):
+        return docker_tool
     if intent == registry.Intent.SUMMARY and registry.is_registered_tool("summarize_k8s_pods"):
         return "summarize_k8s_pods"
     if intent == registry.Intent.POD and registry.is_registered_tool("get_k8s_pods"):
@@ -168,6 +175,9 @@ def _selected_tool(message: str) -> str | None:
         "get_public_ip"
     ):
         return "get_public_ip"
+    github_tool = registry.github_tool_for_prompt(message)
+    if github_tool and registry.is_registered_tool(github_tool):
+        return github_tool
     if registry.REPO_PATTERN.search(message) and any(
         keyword in normalized for keyword in ["repo", "repository", "저장소", "github"]
     ) and registry.is_registered_tool("get_github_repo_info"):
@@ -177,6 +187,8 @@ def _selected_tool(message: str) -> str | None:
 
 
 def _planned_tool(plan: PlannerResult, message: str) -> str | None:
+    if not plan.needs_tool:
+        return None
     for tool_name in [*plan.required_tools, plan.suggested_tool]:
         if tool_name and registry.is_registered_tool(tool_name):
             return tool_name
@@ -201,13 +213,23 @@ def _parallel_tool_candidates(message: str, selected_tool: str | None) -> list[s
         return []
 
     candidates: list[str] = []
-    if registry.has_git_query_intent(message):
-        candidates.append("get_git_status")
+    git_tool = registry.git_tool_for_prompt(message)
+    if git_tool:
+        candidates.append(git_tool)
+    k8s_tool = registry.k8s_tool_for_prompt(message)
+    if k8s_tool:
+        candidates.append(k8s_tool)
+    docker_tool = registry.docker_tool_for_prompt(message)
+    if docker_tool:
+        candidates.append(docker_tool)
     if registry.has_k8s_query_intent(message):
         candidates.append(selected_tool if selected_tool and selected_tool.startswith("get_k8s_") else "get_k8s_pods")
     if any(keyword in normalized for keyword in ["public ip", "공인 ip", "퍼블릭 ip"]):
         candidates.append("get_public_ip")
-    if registry.REPO_PATTERN.search(message) and any(
+    github_tool = registry.github_tool_for_prompt(message)
+    if github_tool:
+        candidates.append(github_tool)
+    elif registry.REPO_PATTERN.search(message) and any(
         keyword in normalized for keyword in ["github", "repo", "repository", "저장소"]
     ):
         candidates.append("get_github_repo_info")
@@ -228,6 +250,16 @@ def _activity_intent(intent: str, tool_name: str | None) -> str:
         return "KUBERNETES"
     if tool_name == "get_git_status":
         return "GIT"
+    if tool_name in {
+        "get_docker_status",
+        "docker_build",
+        "docker_run",
+        "docker_stop",
+        "docker_rm",
+        "docker_compose_up",
+        "docker_compose_down",
+    }:
+        return "DOCKER"
     if tool_name == "get_github_repo_info":
         return "GITHUB"
     if tool_name == "get_public_ip":
@@ -688,6 +720,9 @@ async def _stream_chat_events(request: ChatRequest) -> AsyncIterator[str]:
         selected_agent=result.flow.selection_agent,
         executed_tool_name=",".join(parallel_tools) if parallel_tools else tool_name,
         tool_result=result.raw_answer,
+        validation_result=f"{validation_reason}: {validation_message}",
+        permission_result=registry.permission_result(tool_name, message),
+        final_answer_summary=result.answer,
     )
     yield _trace_event(
         "memory_save",
@@ -921,6 +956,9 @@ async def handle_chat(request: ChatRequest) -> ChatResponse:
         selected_agent=result.flow.selection_agent,
         executed_tool_name=",".join(parallel_tools) if parallel_tools else tool_name,
         tool_result=result.raw_answer,
+        validation_result=f"{validation_reason}: {validation_message}",
+        permission_result=registry.permission_result(tool_name, request.message),
+        final_answer_summary=result.answer,
     )
     observability.add_step(request_id, "memory_save", "success", "Memory 저장을 완료했습니다.")
     observability.add_step(request_id, "final_answer", "success", "최종 답변을 생성했습니다.")

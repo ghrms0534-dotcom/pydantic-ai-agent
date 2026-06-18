@@ -1,51 +1,45 @@
 # MAOS
 
-MAOS는 **Multi-Agent Orchestration System**의 약자이다.
+MAOS is the **Multi-Agent Autonomous Runtime**.
 
-이 프로젝트는 로컬 환경에서 실행 가능한 AI Agent Runtime System을 직접 설계하고 구축하는 것을 목표로 한다.
+Autonomous multi-agent runtime platform built with Python, FastAPI, React, and local LLM infrastructure. MAOS routes user requests through planner, role agents, tool execution, validation, memory, and observability layers while keeping execution local-first and inspectable.
 
-기존 단일 LLM 기반 Chatbot 구조가 아니라, 사용자의 요청을 분석하고 역할별 Agent가 작업을 수행하며 Tool 실행 결과를 검증하는 **Multi-Agent Architecture (MAS)** 구조를 기반으로 설계하였다.
-
-최종 목표는 단순 질의응답 시스템이 아닌 **Production 수준의 AI Agent Platform 구축**이다.
+The project is designed as a practical engineering portfolio for building production-style agent runtimes rather than a simple chatbot wrapper.
 
 ---
 
 ## 시스템 개요
 
-사용자가 자연어로 질문을 입력하면 시스템은 질문을 분석하여 어떤 작업인지 먼저 판단한다.
+MAOS analyzes a user request, classifies the required task, selects the appropriate agent, executes registered tools, validates the result, and returns a final response.
 
-일반적인 Chat 요청인지, Kubernetes 상태 조회인지, Git 상태 확인인지, API 호출이 필요한 작업인지 먼저 분류한 뒤 적절한 Agent를 선택한다.
-
-선택된 Agent는 필요한 Tool을 실행하고 결과를 검증한 후 최종 응답을 생성한다.
-
-전체 시스템은 다음과 같은 구조로 동작한다.
+The runtime currently supports general chat, code analysis and modification, Git/GitHub workflows, Kubernetes and Docker operations, file inspection, system status checks, persistent memory, tracing, and guarded validation commands.
 
 ```text
-사용자 요청
-   │
-   ▼
+User Request
+   |
+   v
 Frontend Dashboard (React)
-   │
-   ▼
+   |
+   v
 FastAPI Backend
-   │
-   ▼
+   |
+   v
 Planner Agent
-   │
-   ▼
+   |
+   v
 Role Agent Selection
-(Chat / DevOps / API / Local)
-   │
-   ▼
+(Chat / Coding / Git / GitHub / Kubernetes / Docker / File / System)
+   |
+   v
 Tool Selection
-   │
-   ▼
+   |
+   v
 Tool Execution
-   │
-   ▼
+   |
+   v
 Validation Layer
-   │
-   ▼
+   |
+   v
 Final Response
 ```
 
@@ -53,130 +47,217 @@ Final Response
 
 ## 시스템 구성 요소
 
-이 프로젝트를 구성하는 모든 요소는 로컬 환경에서 직접 실행 가능하도록 설계하였다.
+MAOS is composed of a local backend runtime, a React dashboard, registered tool adapters, and local model infrastructure.
 
-| 구성 요소          | 기술                | 역할                                |
-| ------------------ | ------------------- | ----------------------------------- |
-| Frontend Dashboard | React + TypeScript  | 사용자 채팅 UI 및 Agent 상태 시각화 |
-| Backend API        | FastAPI             | API 서버 및 Agent Runtime 관리      |
-| Agent Framework    | PydanticAI          | Agent 실행 구조 관리                |
-| Model Runtime      | Ollama              | 로컬 LLM 실행                       |
-| Planner            | Python              | 사용자 요청 분석 및 작업 분류       |
-| Role Agents        | Python              | 역할별 Agent 실행                   |
-| Tool Registry      | Python              | 사용 가능한 Tool 중앙 관리          |
-| Validation Layer   | Python              | Tool 실행 결과 검증                 |
-| Infrastructure     | Docker + Kubernetes | 컨테이너 실행 및 배포 환경          |
+### Tech Stack
+
+| Area | Stack | Role |
+| --- | --- | --- |
+| Backend | Python, FastAPI, PydanticAI, SQLite | API server, agent runtime, memory, trace storage |
+| Frontend | React, TypeScript, Vite | Chat dashboard, agent activity, tool visibility |
+| Infrastructure | Docker, Kubernetes, Ollama Local LLM | Local runtime, container orchestration, model execution |
+| Tooling | Git, GitHub API, kubectl, Docker CLI | External task execution through guarded tools |
 
 ---
 
 ## Agent Architecture
 
-시스템은 역할별 Agent 구조를 기반으로 동작한다.
+MAOS uses role-specific agents so each request can be handled by the smallest capable execution path.
 
-각 Agent는 독립적인 역할을 수행하도록 분리하였다.
-
-현재 Agent 구조는 다음과 같다.
+Each agent has a focused responsibility and relies on the shared Tool Registry, validation layer, memory store, and trace pipeline.
 
 ### Planner Agent
 
-사용자의 요청을 분석하여 어떤 유형의 작업인지 먼저 판단한다.
+Classifies user intent, selects the target agent, and suggests the required tool when a tool is needed.
 
-예시
+Examples:
 
-- 일반 대화
-- Kubernetes 관련 요청
-- Git 관련 요청
-- GitHub API 요청
-- 시스템 로컬 작업 요청
+- General chat
+- Coding request
+- Git or GitHub workflow
+- Kubernetes or Docker operation
+- File or system inspection
 
 ---
 
 ### DevOps Agent
 
-인프라 관련 작업을 담당한다.
+Provides the infrastructure-oriented agent grouping used by Git, Kubernetes, Docker, and related operational tools.
 
-지원 작업
+Current scope:
 
-- Kubernetes Pod 상태 조회
-- Deployment 상태 확인
-- Docker Container 조회
-- Infrastructure 상태 확인
+- Local Git inspection
+- Container runtime status
+- Kubernetes resource operations
+- Infrastructure command routing through guarded tools
+
+---
+
+### Coding Agent
+
+Handles code analysis, code transformation, automated modification, validation, self-correction, and guarded code workflows.
+
+Current capabilities:
+
+- Explain, review, and transform code
+- Read project files safely
+- Search project code
+- Modify files only on explicit request
+- Run allowlisted validation commands
+- Retry one self-correction when validation fails
+- Return diff and validation summaries
+
+---
+
+### Validator Agent
+
+Validates tool output before it is used in the final answer.
+
+Current checks:
+
+- Empty result
+- Error text
+- Command failure
+- Timeout
+- Unusable output format
 
 ---
 
 ### Git Agent
 
-Git 관련 작업을 담당한다.
+Handles local Git repository inspection and guarded Git operations.
 
-지원 작업
+Current capabilities:
 
-- Git Status 확인
-- Branch 조회
-- Commit 상태 확인
-- Remote Repository 확인
+- Git status
+- Git branch
+- Git diff for modified files
+- Guarded write/destructive command handling
+
+---
+
+### GitHub Agent
+
+Handles GitHub repository interactions through the existing API structure and authentication flow.
+
+Current capabilities:
+
+- Repository lookup
+- Create pull request
+- Create issue
+- Create release
+- Create branch
+- Commit/push through GitHub API when explicitly allowed
 
 ---
 
 ### API Agent
 
-외부 API 호출이 필요한 작업을 담당한다.
+Handles external API-oriented tasks through registered API tools.
 
-지원 작업
+Current scope:
 
-- GitHub Repository API
-- Network API
-- 외부 서비스 상태 확인
+- GitHub repository API calls
+- Network utility API calls
+- API tool routing through the shared registry
+
+---
+
+### Kubernetes Agent
+
+Handles Kubernetes inspection and guarded operational commands.
+
+Current capabilities:
+
+- Pod status
+- Logs
+- Exec
+- Apply
+- Delete
+- Scale
+- Rollout restart
+
+---
+
+### Docker Agent
+
+Handles Docker runtime inspection and guarded container operations.
+
+Current capabilities:
+
+- Docker container status
+- Build
+- Run
+- Logs
+- Stop
+- Remove
+- Compose up/down
+
+---
+
+### File Agent
+
+Handles project file and directory lookup.
+
+Current capabilities:
+
+- Project file listing
+- Directory inspection
+- Safe project-root-bounded file access
+
+---
+
+### System Agent
+
+Handles local runtime and system-level status requests.
+
+Current capabilities:
+
+- System status
+- Public IP lookup
+- SQLite memory status
 
 ---
 
 ## Tool Execution System
 
-Agent는 직접 작업하지 않는다.
+Agents do not execute arbitrary work directly. They use the Tool Registry to select a registered tool, execute it, validate its output, and return a controlled result.
 
-각 Agent는 Tool Registry에 등록된 Tool을 선택하여 작업을 수행한다.
+Current tool groups:
 
-현재 Tool 구조는 다음과 같다.
+| Group | Examples |
+| --- | --- |
+| Coding Tools | `list_directory`, `read_file`, `search_code`, `write_file`, `replace_in_file`, `run_validation` |
+| Git Tools | `get_git_status`, `get_git_branch`, `get_git_diff` |
+| GitHub Tools | repository lookup, pull request, issue, release, branch |
+| Kubernetes Tools | pods, logs, exec, apply, delete, scale, rollout restart |
+| Docker Tools | ps, build, run, logs, stop, rm, compose up/down |
+| System Tools | memory status, system status, public IP |
 
-Infrastructure Tools
+Safety rules:
 
-- Kubernetes Tool
-- Docker Tool
-
-Development Tools
-
-- Git Tool
-- GitHub Tool
-
-System Tools
-
-- Network Tool
-- Local System Tool
-
-모든 Tool 실행 이후 Validation Layer가 결과를 검증한다.
-
-검증 항목
-
-- 응답 데이터 존재 여부
-- Error 문자열 확인
-- 비정상 출력 감지
-- 사용자 응답 가능 여부 판단
+- No file modification without explicit edit intent
+- No project-root escape
+- Sensitive file names are blocked
+- Validation commands are allowlisted
+- Git commit/push is not run automatically
+- Coding self-correction retries at most once
 
 ---
 
 ## Frontend Dashboard
 
-Frontend는 단순 Chat UI가 아니다.
+The frontend is a runtime dashboard, not only a chat UI.
 
-Agent Runtime 상태를 실시간으로 시각화하도록 설계하였다.
+Current dashboard features:
 
-현재 Dashboard 기능
-
-- 실시간 Chat
-- Agent Activity 확인
-- Tool 상태 확인
-- Execution Trace
-- Session History
-- Settings 관리
+- Real-time chat
+- Agent activity
+- Tool status
+- Execution trace
+- Session history
+- Settings
+- Memory controls
 
 ---
 
@@ -184,60 +265,152 @@ Agent Runtime 상태를 실시간으로 시각화하도록 설계하였다.
 
 ```text
 backend/
-
-app/agent/
- ├── planner.py
- ├── model_router.py
- ├── role_agents.py
- ├── runner.py
-
-app/agents/
- ├── devops_agent.py
- ├── api_agent.py
- ├── orchestrator_agent.py
-
-app/tools/
- ├── registry.py
- ├── validation.py
+  app/
+    agent/
+      planner.py
+      model_router.py
+      role_agents.py
+      runner.py
+    agents/
+      devops_agent.py
+      api_agent.py
+      orchestrator_agent.py
+    tools/
+      registry.py
+      validation.py
+      local_tools.py
 
 frontend/
+  src/
+    components/
+    data/
+    utils/
 
 k8s/
 ```
 
 ---
 
+## Environment Setup
+
+### Required
+
+- Python 3.14+
+- Node.js 24+
+- Docker Desktop
+- Kubernetes with kind
+- Ollama
+
+### Python Environment
+
+```bash
+python -m venv .venv
+```
+
+Activate on Windows:
+
+```powershell
+.venv\Scripts\activate
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## Run Guide
+
+### Backend
+
+```bash
+uv run uvicorn backend.app.api.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Swagger:
+
+```text
+http://localhost:8000/docs
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Frontend URL:
+
+```text
+http://localhost:5173
+```
+
+### Build
+
+```bash
+cd frontend
+npm run build
+```
+
+---
+
+## API
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/health` | Backend health check |
+| GET | `/tools` | Tool metadata for dashboard discovery |
+| POST | `/chat` | Chat endpoint |
+| POST | `/api/chat` | API chat endpoint used by the dashboard |
+
+---
+
 ## 핵심 목표
 
-이 프로젝트의 목적은 단순히 AI Chatbot을 만드는 것이 아니다.
+MAOS is not intended to be a basic LLM chat demo. The goal is to implement a local, inspectable, multi-agent runtime that can route work, execute tools, validate results, preserve memory, and expose operational traces.
 
-직접 Multi-Agent System Architecture를 설계하고 실제 동작 가능한 Runtime Platform 형태로 구현하는 것이다.
+The project focuses on practical agent engineering patterns:
 
-현재 AI 시스템은 단순 LLM 호출에서 벗어나 여러 Agent가 역할을 분리하고 Tool을 활용하는 방향으로 발전하고 있다.
-
-이 프로젝트는 그러한 구조를 로컬 환경에서 직접 구현하는 것을 목표로 한다.
+- Planner-driven routing
+- Role-specific agents
+- Tool registry and permission checks
+- Memory-backed request context
+- Validation and self-correction
+- Runtime observability
 
 ---
 
 ## 현재 구현 상태
 
-현재 구현 완료 항목
+Implemented capabilities:
 
-- Multi-Agent Architecture
+- Multi-agent architecture
 - Planner Agent
-- Role-based Agent Structure
+- Coding Agent
+- Validator Agent
+- Git Agent
+- GitHub Agent
+- Kubernetes Agent
+- Docker Agent
+- File Agent
+- System Agent
 - Tool Registry
-- Tool Validation System
-- FastAPI API Server
-- React Dashboard
-- Ollama Local Model Integration
-- Docker Container Runtime
-- Kubernetes Deployment
+- Persistent SQLite memory
+- Request trace and runtime metrics
+- File read/write safety guards
+- Allowlisted validation runner
+- React dashboard
+- FastAPI backend
+- Ollama local model integration
 
 ---
 
 ## 개발 목적
 
-AI Engineering 분야에서는 단순 LLM 호출보다 실제 Agent Runtime 구조 설계가 중요해지고 있다.
+This project demonstrates how an agent platform can move beyond direct LLM calls into a structured runtime with planning, tool execution, validation, memory, and traceability.
 
-이 프로젝트는 그러한 구조를 이해하고 직접 구현하기 위한 개인 AI Engineering Project이다.
+MAOS is built as a personal AI engineering project focused on practical architecture, local execution, and safe automation.

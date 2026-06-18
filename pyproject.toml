@@ -1,7 +1,7 @@
 [project]
 name = "maos"
 version = "0.1.0"
-description = "Local AI agent using PydanticAI and Ollama."
+description = "MAOS - Multi-Agent Autonomous Runtime."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

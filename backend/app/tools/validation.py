@@ -12,7 +12,16 @@ KUBECTL_ERROR_MARKERS = (
     "kubernetes 명령 실행에 실패했습니다",
 )
 POD_STATUS_MARKERS = ("running", "pending", "error", "crashloopbackoff", "completed", "failed")
-GENERIC_ERROR_MARKERS = ("exception", "traceback", "failed", "timeout")
+GENERIC_ERROR_MARKERS = (
+    "exception",
+    "traceback",
+    "timeout",
+    "command failed",
+    "non-zero exit",
+    "exit code",
+    "명령 실행에 실패",
+    "오류가 발생",
+)
 
 
 @dataclass(frozen=True)
@@ -29,7 +38,14 @@ def validate_tool_result(result: Any, tool_name: str | None = None) -> ToolValid
     if not text.strip():
         return _fail("empty", "결과가 비어 있습니다.")
 
+    if tool_name is None and ("exception" in lowered or "error:" in lowered or "traceback" in lowered):
+        return _fail("error", "요청 처리 중 오류가 발생했습니다. 입력이나 실행 환경을 확인해주세요.")
+    if tool_name is None:
+        return ToolValidation(ok=True, reason="ok", message="검증을 통과했습니다.")
+
     if isinstance(result, dict):
+        if result.get("returncode") not in (None, 0, "0"):
+            return _fail("command_failed", "명령 실행에 실패했습니다. 입력값이나 실행 환경을 확인해주세요.")
         error_value = result.get("stderr") or result.get("error")
         if error_value:
             return _classify_error(str(error_value))
@@ -38,20 +54,11 @@ def validate_tool_result(result: Any, tool_name: str | None = None) -> ToolValid
     if marker_error:
         return _classify_error(text)
 
-    if "error" in lowered or any(marker in lowered for marker in GENERIC_ERROR_MARKERS):
-        return _fail("error", "요청 처리 중 오류가 발생했습니다. 입력이나 실행 환경을 확인해주세요.")
-
     if tool_name == "get_k8s_pods" and not _looks_like_pod_output(lowered):
-        return _fail("unexpected_kubectl_format", "예상한 kubectl 출력 형식이 아닙니다.")
+        return _fail("unusable_format", "도구 결과 형식을 해석할 수 없습니다.")
 
-    if "결과가 비어 있습니다" in text:
-        return _fail("empty", "결과가 비어 있습니다.")
-    if "클러스터 연결 실패" in text:
-        return _fail("cluster_connection_failed", "클러스터 연결 실패로 보입니다.")
-    if "권한 문제" in text:
-        return _fail("permission_denied", "권한 문제로 조회하지 못했습니다.")
-    if "예상한 kubectl 출력 형식이 아닙니다" in text:
-        return _fail("unexpected_kubectl_format", "예상한 kubectl 출력 형식이 아닙니다.")
+    if "error" in lowered or any(marker in lowered for marker in GENERIC_ERROR_MARKERS):
+        return _fail("error", "도구 실행 중 오류가 발생했습니다. 입력값이나 실행 환경을 확인해주세요.")
 
     return ToolValidation(ok=True, reason="ok", message="검증을 통과했습니다.")
 
@@ -85,12 +92,12 @@ def _first_marker(lowered: str) -> str | None:
 def _classify_error(text: str) -> ToolValidation:
     lowered = text.lower()
     if "forbidden" in lowered:
-        return _fail("permission_denied", "권한 문제로 조회하지 못했습니다.")
+        return _fail("permission_denied", "권한 문제로 실행하지 못했습니다.")
     if "unable to connect" in lowered or "connection refused" in lowered:
-        return _fail("cluster_connection_failed", "클러스터 연결 실패로 보입니다.")
+        return _fail("connection_failed", "대상 서비스에 연결하지 못했습니다.")
     if "timeout" in lowered:
-        return _fail("timeout", "클러스터 연결 실패로 보입니다.")
-    return _fail("kubectl_error", "클러스터 연결 실패로 보입니다.")
+        return _fail("timeout", "명령 실행 시간이 초과되었습니다.")
+    return _fail("command_failed", "명령 실행에 실패했습니다. 입력값이나 실행 환경을 확인해주세요.")
 
 
 def _looks_like_pod_output(lowered: str) -> bool:

@@ -145,13 +145,13 @@ def finish_trace(request_id: str, status: str = "success") -> None:
         _metrics["last_request_at"] = _now()
         if trace.parallel_tool_executions:
             _metrics["total_tool_calls"] += len(trace.parallel_tool_executions)
-            _metrics["last_tool_name"] = trace.parallel_tool_executions[-1].get("tool_name")
+            _metrics["last_tool_name"] = _recent_tool_name(trace.parallel_tool_executions[-1].get("tool_name"))
             _metrics["failed_tool_calls"] += sum(
                 1 for result in trace.parallel_tool_executions if result.get("status") != "success"
             )
         elif trace.tool_execution:
             _metrics["total_tool_calls"] += 1
-            _metrics["last_tool_name"] = trace.tool_execution.tool_name
+            _metrics["last_tool_name"] = _recent_tool_name(trace.tool_execution.tool_name)
             if trace.tool_execution.status == "failed":
                 _metrics["failed_tool_calls"] += 1
 
@@ -217,3 +217,11 @@ def _now() -> str:
 def _clip(text: str) -> str:
     text = text.strip()
     return text if len(text) <= SUMMARY_LIMIT else text[: SUMMARY_LIMIT - 3].rstrip() + "..."
+
+
+def _recent_tool_name(tool_name: str | None) -> str | None:
+    return {
+        "get_git_status": "git_status",
+        "get_git_branch": "git_branch",
+        "get_docker_status": "docker_ps",
+    }.get(tool_name or "", tool_name)

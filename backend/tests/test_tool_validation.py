@@ -26,7 +26,21 @@ def test_validate_kubectl_error_string() -> None:
 
     assert validation.ok is False
     assert validation.reason == "permission_denied"
-    assert validation.message == "권한 문제로 조회하지 못했습니다."
+    assert validation.message == "권한 문제로 실행하지 못했습니다."
+
+
+def test_validate_command_failure_dict() -> None:
+    validation = validate_tool_result({"returncode": 1, "stderr": "fatal: command failed"}, "git_pull")
+
+    assert validation.ok is False
+    assert validation.reason == "command_failed"
+
+
+def test_validate_unusable_kubectl_format() -> None:
+    validation = validate_tool_result("hello world", "get_k8s_pods")
+
+    assert validation.ok is False
+    assert validation.reason == "unusable_format"
 
 
 def test_validation_retry_returns_clear_message_after_second_failure() -> None:

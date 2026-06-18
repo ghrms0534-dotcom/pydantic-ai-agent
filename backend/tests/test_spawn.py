@@ -5,6 +5,7 @@ from backend.app.api.schemas import PlannerResult
 def test_spawn_selects_registered_agents() -> None:
     for target, display_name in {
         "chat": "Chat Agent",
+        "coding": "Coding Agent",
         "git": "Git Agent",
         "github": "GitHub Agent",
         "kubernetes": "Kubernetes Agent",
