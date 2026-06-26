@@ -8,6 +8,8 @@ MAOS는 이러한 한계를 해결하기 위해 **Planning → Agent Routing →
 
 ---
 
+<img width="1888" height="863" alt="maos" src="https://github.com/user-attachments/assets/aa2ebe13-f4a3-4ead-bb90-b01fe6318216" />
+
 ## 프로젝트 목표
 
 기존 LLM 기반 Assistant의 한계
